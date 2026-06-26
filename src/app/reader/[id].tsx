@@ -182,7 +182,7 @@ function readerScript() {
   </script>`;
 }
 
-function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, reduceMotion: boolean) {
+function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, reduceMotion: boolean, readerUiActive: boolean) {
   const theme = themeValues[preferences.theme];
   return `
     (function() {
@@ -190,6 +190,7 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
       var margin = ${preferences.margin};
       var reduceMotion = ${reduceMotion ? 'true' : 'false'};
       var restoreRatio = ${restoreRatio};
+      window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'};
 
       function postMessage(payload) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
@@ -319,6 +320,10 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
           }
           var selection = window.getSelection ? window.getSelection().toString().trim() : "";
           if (selection) {
+            return;
+          }
+          if (window.__INBOX_UI_ACTIVE__) {
+            postMessage({ type: "dismissChrome" });
             return;
           }
           if (mode === "page") {
@@ -577,6 +582,12 @@ export default function ReaderScreen() {
         setChromeVisible((visible) => !visible);
       }
 
+      if (payload.type === 'dismissChrome') {
+        Keyboard.dismiss();
+        setPanel(null);
+        setChromeVisible(false);
+      }
+
       if (payload.type === 'progress' && typeof payload.ratio === 'number') {
         if (preferences.readingMode === 'page' && (typeof payload.pageIndex !== 'number' || typeof payload.pageCount !== 'number')) {
           return;
@@ -619,7 +630,15 @@ export default function ReaderScreen() {
     [book, chapters.length, commitProgress, currentChapter, currentIndex, db, preferences.readingMode, showNotice]
   );
 
-  const injectedJavaScript = useMemo(() => preferenceScript(preferences, restoreRatio, reduceMotion), [preferences, reduceMotion, restoreRatio]);
+  const readerUiActive = chromeVisible || panel !== null;
+  const injectedJavaScript = useMemo(
+    () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive),
+    [preferences, readerUiActive, reduceMotion, restoreRatio]
+  );
+
+  useEffect(() => {
+    webViewRef.current?.injectJavaScript(`window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'}; true;`);
+  }, [readerUiActive]);
 
   const saveNote = useCallback(async () => {
     if (!book || !currentChapter || !noteDraft.trim()) {
