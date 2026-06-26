@@ -5,6 +5,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
 import { themeAssets } from '@/constants/theme-assets';
+import { cleanChapterTitle } from '@/lib/text-utils';
 import type { Book, ReaderTheme } from '@/types/reader';
 
 const coverThemes: ReaderTheme[] = ['mist', 'deep', 'reading'];
@@ -28,6 +29,7 @@ export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
   const coverTheme = theme ?? themeFor(book.id);
   const themeToken = brand.themes[coverTheme];
   const compact = size === 'small';
+  const displayTitle = cleanChapterTitle(book.title, book.title || '未命名书籍');
   const textColor = coverTheme === 'deep' ? brand.colors.white : themeToken.text;
   const quietTextColor = coverTheme === 'deep' ? 'rgba(255, 255, 255, 0.74)' : themeToken.muted;
   const titleStyle = size === 'hero' ? styles.heroTitle : size === 'small' ? styles.smallTitle : styles.gridTitle;
@@ -48,7 +50,7 @@ export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
       {!compact && (
         <View style={[styles.copy, copyStyle]}>
           <Text numberOfLines={3} style={[styles.title, titleStyle, { color: textColor }]}>
-            {book.title}
+            {displayTitle}
           </Text>
           <Text numberOfLines={1} style={[styles.author, { color: quietTextColor }]}>
             {authorLabel(book.author)}

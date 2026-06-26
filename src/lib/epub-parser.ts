@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { unzipSync } from 'fflate';
 
-import { makeId, stripHtml, wordCount } from '@/lib/text-utils';
+import { cleanChapterTitle, makeId, stripHtml, wordCount } from '@/lib/text-utils';
 import type { BookFormat } from '@/types/reader';
 
 type ParsedChapter = {
@@ -38,6 +38,9 @@ function asArray<T>(value: T | T[] | undefined | null): T[] {
 }
 
 function textValue(value: unknown, fallback = ''): string {
+  if (Array.isArray(value)) {
+    return textValue(value[0], fallback);
+  }
   if (typeof value === 'string' || typeof value === 'number') {
     return String(value);
   }
@@ -67,6 +70,10 @@ function normalizePath(path: string) {
   return parts.join('/');
 }
 
+function resolveHref(basePath: string, href: string) {
+  return normalizePath(`${basePath}${href.split('#')[0]}`);
+}
+
 function decodeZipFile(zip: Record<string, Uint8Array>, path: string) {
   const bytes = zip[path] ?? zip[decodeURIComponent(path)] ?? zip[encodeURI(path)];
   if (!bytes) {
@@ -83,8 +90,10 @@ function bodyHtml(html: string) {
 }
 
 function guessTitleFromHtml(html: string, fallback: string) {
-  const heading = html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i)?.[1];
-  return stripHtml(heading || '').slice(0, 90) || fallback;
+  const heading = html.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)?.[1];
+  const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  const firstText = stripHtml(bodyHtml(html)).split(/[。！？.!?\n]/)[0];
+  return cleanChapterTitle(stripHtml(heading || title || firstText), fallback);
 }
 
 function buildReaderHtml(title: string, html: string) {
@@ -137,13 +146,21 @@ function escapeAttribute(input: string) {
   return input.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 }
 
-function collectNavLabels(zip: Record<string, Uint8Array>, basePath: string, manifestItems: any[]) {
+function addLabel(labels: Map<string, string>, href: string, label: string) {
+  const cleaned = cleanChapterTitle(label, '');
+  if (cleaned) {
+    labels.set(href, cleaned);
+  }
+}
+
+function collectNavDocumentLabels(zip: Record<string, Uint8Array>, basePath: string, manifestItems: any[]) {
   const navItem = manifestItems.find((item) => String(item.properties ?? '').includes('nav'));
   if (!navItem?.href) {
     return new Map<string, string>();
   }
 
   const navPath = normalizePath(`${basePath}${navItem.href}`);
+  const navBasePath = dirname(navPath);
   const navHtml = decodeZipFile(zip, navPath);
   const labels = new Map<string, string>();
   if (!navHtml) {
@@ -152,14 +169,55 @@ function collectNavLabels(zip: Record<string, Uint8Array>, basePath: string, man
 
   const linkPattern = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   for (const match of navHtml.matchAll(linkPattern)) {
-    const href = normalizePath(`${basePath}${match[1].split('#')[0]}`);
-    const label = stripHtml(match[2]).slice(0, 90);
-    if (label) {
-      labels.set(href, label);
-    }
+    addLabel(labels, resolveHref(navBasePath, match[1]), stripHtml(match[2]));
   }
 
   return labels;
+}
+
+function collectNcxLabels(zip: Record<string, Uint8Array>, basePath: string, manifestItems: any[], spine: any) {
+  const tocId = spine?.toc ? String(spine.toc) : null;
+  const ncxItem =
+    (tocId ? manifestItems.find((item) => String(item.id) === tocId) : null) ??
+    manifestItems.find((item) => String(item['media-type'] ?? '').includes('dtbncx') || /\.ncx$/i.test(String(item.href ?? '')));
+
+  const labels = new Map<string, string>();
+  if (!ncxItem?.href) {
+    return labels;
+  }
+
+  const ncxPath = normalizePath(`${basePath}${ncxItem.href}`);
+  const ncxBasePath = dirname(ncxPath);
+  const ncxXml = decodeZipFile(zip, ncxPath);
+  if (!ncxXml) {
+    return labels;
+  }
+
+  const navMap = parser.parse(ncxXml)?.ncx?.navMap;
+  const visit = (points: any[]) => {
+    for (const point of points) {
+      const src = textValue(point?.content?.src);
+      const label = textValue(point?.navLabel?.text);
+      if (src && label) {
+        addLabel(labels, resolveHref(ncxBasePath, src), label);
+      }
+      visit(asArray(point?.navPoint));
+    }
+  };
+
+  visit(asArray(navMap?.navPoint));
+  return labels;
+}
+
+function mergeLabels(...maps: Map<string, string>[]) {
+  const merged = new Map<string, string>();
+  for (const map of maps) {
+    for (const [href, label] of map) {
+      merged.set(href, label);
+    }
+  }
+
+  return merged;
 }
 
 export function parseEpub(bytes: Uint8Array, fallbackName: string): ParsedBook {
@@ -186,13 +244,26 @@ export function parseEpub(bytes: Uint8Array, fallbackName: string): ParsedBook {
   const manifestItems = asArray(opf?.manifest?.item);
   const spineItems = asArray(opf?.spine?.itemref);
   const basePath = dirname(opfPath);
-  const navLabels = collectNavLabels(zip, basePath, manifestItems);
+  const tocLabels = mergeLabels(
+    collectNcxLabels(zip, basePath, manifestItems, opf?.spine),
+    collectNavDocumentLabels(zip, basePath, manifestItems)
+  );
 
   const manifestById = new Map(manifestItems.map((item: any) => [String(item.id), item]));
   const chapters = spineItems
     .map((item: any, index) => {
       const manifestItem = manifestById.get(String(item.idref));
       if (!manifestItem?.href) {
+        return null;
+      }
+      if (String(item.linear ?? 'yes').toLowerCase() === 'no') {
+        return null;
+      }
+      if (String(manifestItem.properties ?? '').includes('nav')) {
+        return null;
+      }
+      const mediaType = String(manifestItem['media-type'] ?? '');
+      if (mediaType && !/x?html/i.test(mediaType)) {
         return null;
       }
 
@@ -202,12 +273,12 @@ export function parseEpub(bytes: Uint8Array, fallbackName: string): ParsedBook {
         return null;
       }
 
-      const fallbackTitle = navLabels.get(href) ?? guessTitleFromHtml(html, `第 ${index + 1} 章`);
+      const fallbackTitle = tocLabels.get(href) ?? guessTitleFromHtml(html, `第 ${index + 1} 章`);
       const text = stripHtml(html);
       return {
         id: makeId('chapter'),
         href,
-        title: fallbackTitle,
+        title: cleanChapterTitle(fallbackTitle, `第 ${index + 1} 章`),
         order: index,
         html: buildReaderHtml(fallbackTitle, html),
         text,
@@ -221,8 +292,8 @@ export function parseEpub(bytes: Uint8Array, fallbackName: string): ParsedBook {
   }
 
   return {
-    title: textValue(metadata.title, fallbackName.replace(/\.(epub|txt)$/i, '')) || '未命名书籍',
-    author: textValue(metadata.creator, '未知作者') || '未知作者',
+    title: cleanChapterTitle(textValue(metadata.title), fallbackName.replace(/\.(epub|txt)$/i, '') || '未命名书籍'),
+    author: cleanChapterTitle(textValue(metadata.creator), '未知作者'),
     format: 'epub',
     chapters,
   };

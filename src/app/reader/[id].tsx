@@ -32,6 +32,7 @@ import {
   searchBook,
   updateReaderPreferences,
 } from '@/lib/reader-service';
+import { cleanChapterTitle } from '@/lib/text-utils';
 import type { Annotation, Book, Chapter, ReaderPreferences, SearchResult } from '@/types/reader';
 
 type Panel = 'toc' | 'search' | 'notes' | 'settings' | null;
@@ -55,16 +56,56 @@ const themeLabels: Record<ReaderPreferences['theme'], string> = {
 };
 
 function chapterLabel(title: string) {
-  return title.replace(/^Part\s+(\d+)$/i, '第 $1 部分').replace(/^Chapter\s+(\d+)$/i, '第 $1 章');
+  return cleanChapterTitle(title, '正文')
+    .replace(/^Part\s+(\d+)$/i, '第 $1 部分')
+    .replace(/^Chapter\s+(\d+)$/i, '第 $1 章');
+}
+
+function bookTitleLabel(title: string) {
+  return cleanChapterTitle(title, title || '未命名书籍');
+}
+
+function cleanInlineContent(input: string) {
+  return input
+    .replace(/\\r/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\\?[\w-]*pq[\w.-]*\.(?:bmp|png|jpe?g|gif)\\?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function renderTextBlock(block: string) {
+  const trimmed = cleanInlineContent(block);
+  if (!trimmed || /^内容[:：]?$/i.test(trimmed)) {
+    return null;
+  }
+
+  const catalogue = trimmed.match(/^<\s*目录\s*>\s*(.+)$/);
+  if (catalogue?.[1]) {
+    return `<p class="section-path">${escapeHtml(catalogue[1]).replace(/\\/g, ' / ')}</p>`;
+  }
+
+  const heading = trimmed.match(/^<\s*(?:篇名|卷名|章名|标题|title)\s*>\s*(.+)$/i);
+  if (heading?.[1]) {
+    return `<h2>${escapeHtml(cleanChapterTitle(heading[1], '正文'))}</h2>`;
+  }
+
+  const content = trimmed.replace(/^内容[:：]\s*/i, '').trim();
+  if (!content) {
+    return null;
+  }
+
+  return `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`;
 }
 
 function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
   const theme = themeValues[preferences.theme];
   const paragraphs = chapter.textContent
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
+    .replace(/\\r/g, '\n')
+    .replace(/\r/g, '\n')
+    .split(/\n{1,}/)
+    .map(renderTextBlock)
     .filter(Boolean)
-    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
     .join('\n');
 
   return `<!doctype html>
@@ -84,6 +125,18 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
       text-rendering: optimizeLegibility;
     }
     p { margin: 0 0 1.08em; }
+    h2 {
+      margin: 1.25em 0 0.75em;
+      font-size: 1.28em;
+      line-height: 1.28;
+    }
+    .section-path {
+      margin: 1.4em 0 0.65em;
+      color: var(--reader-muted, ${theme.muted});
+      font-size: 0.82em;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-weight: 700;
+    }
     ::selection { background: rgba(167, 121, 78, 0.28); }
   </style>
 </head>
@@ -475,7 +528,7 @@ export default function ReaderScreen() {
             </Pressable>
             <View style={styles.titleStack}>
               <Text numberOfLines={1} style={[styles.chromeTitle, { color: chromeTheme.text }]}>
-                {book.title}
+                {bookTitleLabel(book.title)}
               </Text>
               <Text numberOfLines={1} style={[styles.chromeMeta, { color: chromeTheme.muted }]}>
                 {chapterLabel(currentChapter.title)}
@@ -570,19 +623,37 @@ export default function ReaderScreen() {
             </View>
 
             {panel === 'toc' && (
-              <ScrollView contentContainerStyle={styles.panelList}>
-                {chapters.map((chapter, index) => (
-                  <Pressable
-                    key={chapter.id}
-                    onPress={() => goToChapter(index)}
-                    style={[styles.panelRow, index === currentIndex && styles.activePanelRow]}>
-                    <Text numberOfLines={2} style={styles.panelRowTitle}>
-                      {chapterLabel(chapter.title)}
-                    </Text>
-                    <Text style={styles.panelRowMeta}>{chapter.wordCount.toLocaleString()} 字</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
+              <View style={styles.panelBody}>
+                <Text style={[styles.panelSummary, { color: chromeTheme.muted }]}>
+                  共 {chapters.length} 章 · 当前 {currentIndex + 1}/{chapters.length}
+                </Text>
+                <ScrollView contentContainerStyle={styles.panelList}>
+                  {chapters.map((chapter, index) => {
+                    const active = index === currentIndex;
+                    return (
+                      <Pressable
+                        key={chapter.id}
+                        onPress={() => goToChapter(index)}
+                        style={[styles.panelRow, styles.tocRow, active && styles.activePanelRow]}>
+                        <Text style={[styles.tocIndex, active && styles.activeTocIndex]}>{String(index + 1).padStart(2, '0')}</Text>
+                        <View style={styles.tocContent}>
+                          <View style={styles.tocTitleRow}>
+                            <Text numberOfLines={2} style={[styles.panelRowTitle, active && styles.activePanelRowTitle]}>
+                              {chapterLabel(chapter.title)}
+                            </Text>
+                            {active && (
+                              <View style={styles.currentBadge}>
+                                <Text style={styles.currentBadgeText}>当前</Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.panelRowMeta}>{chapter.wordCount.toLocaleString()} 字</Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
             )}
 
             {panel === 'search' && (
@@ -854,6 +925,12 @@ const styles = StyleSheet.create({
   panelBody: {
     gap: 12,
   },
+  panelSummary: {
+    color: brand.colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
   panelInput: {
     minHeight: 48,
     borderRadius: brand.radius.medium,
@@ -888,17 +965,59 @@ const styles = StyleSheet.create({
     borderColor: brand.colors.island,
     backgroundColor: brand.colors.islandSoft,
   },
+  tocRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  tocIndex: {
+    width: 30,
+    color: brand.colors.muted,
+    fontSize: 12,
+    lineHeight: 20,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  activeTocIndex: {
+    color: brand.colors.islandDeep,
+  },
+  tocContent: {
+    flex: 1,
+    minWidth: 0,
+    gap: 5,
+  },
+  tocTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
   panelRowTitle: {
     color: brand.colors.ink,
+    flex: 1,
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '800',
     letterSpacing: 0,
   },
+  activePanelRowTitle: {
+    color: brand.colors.islandDeep,
+  },
   panelRowMeta: {
     color: brand.colors.muted,
     fontSize: 12,
     lineHeight: 17,
+  },
+  currentBadge: {
+    borderRadius: brand.radius.round,
+    backgroundColor: brand.colors.island,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  currentBadgeText: {
+    color: brand.colors.white,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   searchMatchText: {
     color: brand.colors.ink,

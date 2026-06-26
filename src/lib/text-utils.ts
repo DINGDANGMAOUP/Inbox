@@ -58,19 +58,85 @@ export function excerptAround(text: string, offset: number, queryLength: number)
   return `${prefix}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
 }
 
+const chineseNumber = '[零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟0-9０-９]+';
+
+function stripHeadingPrefix(line: string) {
+  return line
+    .replace(/^\uFEFF/, '')
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^[-*_]{3,}\s*$/, '')
+    .trim();
+}
+
+export function cleanChapterTitle(title?: string | null, fallback = '正文') {
+  const cleaned = stripHeadingPrefix(title ?? '')
+    .normalize('NFKC')
+    .replace(/^<\s*(?:篇名|卷名|章名|书名|标题|title)\s*>\s*/i, '')
+    .replace(/^【\s*(?:篇名|卷名|章名|书名|标题)\s*】\s*/i, '')
+    .replace(/<\/?\s*(?:篇名|卷名|章名|书名|标题|title)\s*>/gi, '')
+    .replace(/^\s*(?:目录|Table of Contents)\s*$/i, '目录')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return (cleaned || fallback).slice(0, 90);
+}
+
+function normalizePotentialHeading(line: string) {
+  const cleaned = cleanChapterTitle(line, '');
+  return cleaned.replace(/\s+/g, ' ').trim();
+}
+
+function isTxtHeading(line: string) {
+  if (/^#{1,6}\s+\S.+$/.test(line.trim())) {
+    return true;
+  }
+
+  const title = normalizePotentialHeading(line);
+  if (!title || title.length > 90) {
+    return false;
+  }
+
+  return [
+    /^第[ 　]*[零〇一二三四五六七八九十百千万两壹贰叁肆伍陆柒捌玖拾佰仟0-9０-９]+[ 　]*(?:章|节|回|卷|部|篇|集|折|出).*$/i,
+    new RegExp(`^(?:卷|篇|章|部)[ 　]*${chineseNumber}.*$`, 'i'),
+    /^(?:上卷|中卷|下卷|序|序言|前言|引言|引子|楔子|正文|后记|跋|附录)(?:[ 　].*)?$/i,
+    /^(?:Chapter|Part|Section)\s+[0-9IVXLCDM]+(?:\b|[.:：、]).*$/i,
+    /^[0-9０-９]{1,3}[.、．]\s*\S.{0,70}$/,
+    /^<\s*(?:篇名|卷名|章名|书名|标题|title)\s*>\s*\S.+$/i,
+  ].some((pattern) => pattern.test(stripHeadingPrefix(line).normalize('NFKC')));
+}
+
+function lineOffsets(text: string) {
+  const lines = text.split('\n');
+  let offset = 0;
+  return lines.map((line) => {
+    const current = { line, offset };
+    offset += line.length + 1;
+    return current;
+  });
+}
+
 export function splitTxtIntoChapters(text: string) {
   const normalized = text.replace(/\r\n/g, '\n').trim();
-  const headingPattern = /(?:^|\n)(#{1,3}\s+.+|第.{1,9}[章节回].*|Chapter\s+\d+.*)(?=\n)/gi;
-  const matches = [...normalized.matchAll(headingPattern)];
+  const headings = lineOffsets(normalized).filter(({ line }) => isTxtHeading(line));
 
-  if (matches.length > 1) {
-    return matches.map((match, index) => {
-      const start = match.index ?? 0;
-      const end = matches[index + 1]?.index ?? normalized.length;
+  if (headings.length >= 1) {
+    const firstContent = normalized.slice(0, headings[0].offset).trim();
+    const sections = headings.map((heading, index) => {
+      const start = heading.offset;
+      const end = headings[index + 1]?.offset ?? normalized.length;
       const chunk = normalized.slice(start, end).trim();
-      const firstLine = chunk.split('\n')[0]?.replace(/^#+\s*/, '').trim() || `第 ${index + 1} 章`;
-      return { title: firstLine.slice(0, 80), text: chunk };
+      return {
+        title: cleanChapterTitle(heading.line, `第 ${index + 1} 章`),
+        text: chunk,
+      };
     });
+
+    if (firstContent.length > 160) {
+      sections.unshift({ title: '卷首', text: firstContent });
+    }
+
+    return sections.filter((chapter) => chapter.text.trim());
   }
 
   const chapters: { title: string; text: string }[] = [];

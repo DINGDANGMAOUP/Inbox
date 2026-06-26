@@ -20,6 +20,7 @@ import { IconButton } from '@/components/reader/icon-button';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
 import { themeAssets } from '@/constants/theme-assets';
+import { cleanChapterTitle } from '@/lib/text-utils';
 import { deleteBook, importBook, listBooks } from '@/lib/reader-service';
 import type { LibraryBook, ReaderTheme } from '@/types/reader';
 
@@ -27,11 +28,14 @@ function authorLabel(author: string) {
   return author === 'Local file' ? '本地文件' : author;
 }
 
+function bookTitleLabel(book: Pick<LibraryBook, 'title'>) {
+  return cleanChapterTitle(book.title, book.title || '未命名书籍');
+}
+
 function chapterLabel(title?: string | null) {
-  if (!title) {
-    return '阅读中';
-  }
-  return title.replace(/^Part\s+(\d+)$/i, '第 $1 部分').replace(/^Chapter\s+(\d+)$/i, '第 $1 章');
+  return cleanChapterTitle(title, '阅读中')
+    .replace(/^Part\s+(\d+)$/i, '第 $1 部分')
+    .replace(/^Chapter\s+(\d+)$/i, '第 $1 章');
 }
 
 function hasReadingProgress(book: LibraryBook) {
@@ -135,7 +139,7 @@ function BookTile({
         <View style={styles.tileCopy}>
           <View style={styles.tileTopRow}>
             <Text numberOfLines={2} style={[styles.tileTitle, { color: themeToken.text }]}>
-              {book.title}
+              {bookTitleLabel(book)}
             </Text>
             <View style={[styles.formatPill, { backgroundColor: themeToken.surface, borderColor: themeToken.line }]}>
               <Text style={[styles.formatPillText, { color: themeToken.accent }]}>{book.format.toUpperCase()}</Text>
@@ -176,7 +180,7 @@ export default function LibraryScreen() {
     if (!trimmed) {
       return books;
     }
-    return books.filter((book) => `${book.title} ${book.author}`.toLowerCase().includes(trimmed));
+    return books.filter((book) => `${bookTitleLabel(book)} ${book.author}`.toLowerCase().includes(trimmed));
   }, [books, query]);
 
   const featuredBook = query.trim() ? null : books.find(hasReadingProgress) ?? books[0];
@@ -318,7 +322,7 @@ export default function LibraryScreen() {
             <View style={styles.featuredCopy}>
               <Text style={[styles.sectionKicker, { color: theme.accent }]}>{featuredStarted ? '继续阅读' : '最近导入'}</Text>
               <Text numberOfLines={2} style={[styles.featuredTitle, { color: theme.text }]}>
-                {featuredBook.title}
+                {bookTitleLabel(featuredBook)}
               </Text>
               <Text numberOfLines={1} style={[styles.featuredMeta, { color: theme.muted }]}>
                 {progressLabel(featuredBook)}

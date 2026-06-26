@@ -2,7 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { parseEpub, type ParsedBook } from '@/lib/epub-parser';
-import { excerptAround, hashBytes, makeId, safeFileName, splitTxtIntoChapters, wordCount } from '@/lib/text-utils';
+import { cleanChapterTitle, excerptAround, hashBytes, makeId, safeFileName, splitTxtIntoChapters, wordCount } from '@/lib/text-utils';
 import type {
   Annotation,
   AnnotationType,
@@ -176,7 +176,7 @@ async function parseTxt(source: File, fallbackName: string): Promise<ParsedBook>
     .map((line) => line.trim())
     .find(Boolean);
   const titleLooksLikeProviderId = /^(msf|raw|document):?\d+$/i.test(fallbackTitle) || !/[a-z0-9\u4e00-\u9fff]/i.test(fallbackTitle);
-  const normalizedFirstTitle = firstTextTitle?.replace(/^#{1,6}\s+/, '').trim();
+  const normalizedFirstTitle = cleanChapterTitle(firstTextTitle, '');
   const title = titleLooksLikeProviderId && normalizedFirstTitle ? normalizedFirstTitle.slice(0, 80) : fallbackTitle || '未命名文本';
   const chapters = splitTxtIntoChapters(text).map((chapter, index) => ({
     id: makeId('chapter'),
