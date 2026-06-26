@@ -1,56 +1,36 @@
-# Welcome to your Expo app 👋
+# 墨屿 / Inbox
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+现代化离线本地电子书阅读器，面向 iOS 和 Android。首版支持导入 EPUB 与 TXT，本地保存书籍、章节、搜索索引、阅读进度、书签、划线和笔记。
 
-## Get started
-
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## 开发
 
 ```bash
-npm run reset-project
+bun install
+bun run start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+常用命令：
 
-### Other setup steps
+```bash
+bun run android
+bun run ios
+bun run web
+bun run lint
+bunx tsc --noEmit
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## 图标与主题资产
 
-## Learn more
+品牌、主题背景和 app icon 都是静态资源，生成脚本在 `scripts/`：
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+node scripts/generate-theme-assets.js <source-png>
+node scripts/generate-logo-assets.js <source-png>
+node scripts/build-app-icons.js
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## 当前边界
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- 不支持 PDF。
+- 不做账号、云同步、远程下载或书城。
+- Web 端保持可运行即可，主要验收平台是 iOS 和 Android。
