@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 
 export async function migrateReaderDb(db: SQLiteDatabase) {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -9,7 +9,7 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
   if (currentVersion >= DATABASE_VERSION) {
     return;
   }
-  
+
   await db.execAsync(`
     PRAGMA journal_mode = 'wal';
 
@@ -88,6 +88,25 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
     INSERT OR IGNORE INTO reader_preferences (id, theme, font_size, line_height, margin)
     VALUES ('default', 'mist', 19, 1.7, 22);
   `);
+
+  if (currentVersion < 2) {
+    await db.execAsync(`
+      DELETE FROM reading_progress
+       WHERE book_id IN (
+        SELECT b.id
+          FROM books b
+          JOIN reading_progress p ON p.book_id = b.id
+         WHERE p.scroll_ratio = 0
+           AND p.updated_at = b.imported_at
+           AND b.last_opened_at = b.imported_at
+       );
+
+      UPDATE books
+         SET last_opened_at = NULL
+       WHERE last_opened_at = imported_at
+         AND id NOT IN (SELECT book_id FROM reading_progress);
+    `);
+  }
 
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
 }

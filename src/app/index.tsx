@@ -1,4 +1,4 @@
-import { Link, router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
@@ -11,7 +11,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
@@ -35,12 +34,34 @@ function chapterLabel(title?: string | null) {
   return title.replace(/^Part\s+(\d+)$/i, '第 $1 部分').replace(/^Chapter\s+(\d+)$/i, '第 $1 章');
 }
 
+function hasReadingProgress(book: LibraryBook) {
+  return Boolean(book.progressChapterId);
+}
+
+function bookProgressPercent(book: LibraryBook) {
+  if (!hasReadingProgress(book)) {
+    return null;
+  }
+
+  const chapterOrder = Math.max(0, book.currentChapterOrder ?? 0);
+  const chapterRatio = Math.max(0, Math.min(1, book.progressRatio ?? 0));
+  const totalChapters = Math.max(1, book.totalChapters);
+  return Math.max(0, Math.min(100, Math.round(((chapterOrder + chapterRatio) / totalChapters) * 100)));
+}
+
 function progressLabel(book: LibraryBook) {
-  const percent = Math.round((book.progressRatio ?? 0) * 100);
-  if (!book.progressChapterId) {
-    return '未读';
+  if (!hasReadingProgress(book)) {
+    return '未开始';
+  }
+  const percent = bookProgressPercent(book) ?? 0;
+  if (percent === 0) {
+    return `已打开 · ${chapterLabel(book.currentChapterTitle)}`;
   }
   return `${percent}% · ${chapterLabel(book.currentChapterTitle)}`;
+}
+
+function statusLabel(book: LibraryBook) {
+  return hasReadingProgress(book) ? '继续' : '打开';
 }
 
 function BrandSeal() {
@@ -93,7 +114,8 @@ function BookTile({
   theme: ReaderTheme;
   onDelete: (book: LibraryBook) => void;
 }) {
-  const fillPercent = Math.round((book.progressRatio ?? 0) * 100);
+  const fillPercent = bookProgressPercent(book) ?? 0;
+  const themeToken = brand.themes[theme];
 
   return (
     <Animated.View
@@ -101,37 +123,44 @@ function BookTile({
       exiting={FadeOut.duration(120)}
       layout={LinearTransition.duration(160)}
       style={styles.tile}>
-      <Link href={{ pathname: '/reader/[id]', params: { id: book.id } }} asChild>
-        <Link.Trigger withAppleZoom>
-          <Pressable
-            onLongPress={() => onDelete(book)}
-            style={({ pressed }) => [styles.tilePressable, pressed && styles.pressed]}>
-            <BookCover book={book} theme={theme} />
-            <View style={styles.tileCopy}>
-              <Text numberOfLines={2} style={styles.tileTitle}>
-                {book.title}
-              </Text>
-              <Text numberOfLines={1} style={styles.tileMeta}>
-                {authorLabel(book.author)}
-              </Text>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${fillPercent}%` }]} />
-              </View>
-              <Text numberOfLines={1} style={styles.progressText}>
-                {progressLabel(book)}
-              </Text>
+      <Pressable
+        onPress={() => router.push({ pathname: '/reader/[id]', params: { id: book.id } })}
+        onLongPress={() => onDelete(book)}
+        style={({ pressed }) => [
+          styles.tilePressable,
+          { backgroundColor: themeToken.surfaceSolid, borderColor: themeToken.line },
+          pressed && styles.pressed,
+        ]}>
+        <BookCover book={book} size="small" theme={theme} />
+        <View style={styles.tileCopy}>
+          <View style={styles.tileTopRow}>
+            <Text numberOfLines={2} style={[styles.tileTitle, { color: themeToken.text }]}>
+              {book.title}
+            </Text>
+            <View style={[styles.formatPill, { backgroundColor: themeToken.surface, borderColor: themeToken.line }]}>
+              <Text style={[styles.formatPillText, { color: themeToken.accent }]}>{book.format.toUpperCase()}</Text>
             </View>
-          </Pressable>
-        </Link.Trigger>
-        <Link.Preview />
-      </Link>
+          </View>
+          <Text numberOfLines={1} style={[styles.tileMeta, { color: themeToken.muted }]}>
+            {authorLabel(book.author)}
+          </Text>
+          <View style={styles.tileProgressRow}>
+            <Text numberOfLines={1} style={[styles.progressText, { color: themeToken.muted }]}>
+              {progressLabel(book)}
+            </Text>
+            <Text style={[styles.tileStatus, { color: themeToken.accent }]}>{statusLabel(book)}</Text>
+          </View>
+          <View style={[styles.progressTrack, { backgroundColor: themeToken.line }]}>
+            <View style={[styles.progressFill, { width: `${fillPercent}%`, backgroundColor: themeToken.accent }]} />
+          </View>
+        </View>
+      </Pressable>
     </Animated.View>
   );
 }
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
-  const { width } = useWindowDimensions();
   const [books, setBooks] = useState<LibraryBook[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -142,8 +171,6 @@ export default function LibraryScreen() {
   const ambientTextColor = activeTheme === 'deep' ? brand.colors.white : brand.colors.ink;
   const ambientMutedColor = activeTheme === 'deep' ? 'rgba(247, 248, 251, 0.72)' : brand.colors.muted;
 
-  const columns = width >= 840 ? 4 : width >= 620 ? 3 : 2;
-
   const filteredBooks = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
     if (!trimmed) {
@@ -152,14 +179,12 @@ export default function LibraryScreen() {
     return books.filter((book) => `${book.title} ${book.author}`.toLowerCase().includes(trimmed));
   }, [books, query]);
 
-  const featuredBook = query.trim() ? null : books.find((book) => book.progressChapterId) ?? books[0];
+  const featuredBook = query.trim() ? null : books.find(hasReadingProgress) ?? books[0];
+  const featuredStarted = featuredBook ? hasReadingProgress(featuredBook) : false;
+  const featuredProgressPercent = featuredBook ? bookProgressPercent(featuredBook) : null;
 
-  const averageProgress = useMemo(() => {
-    if (books.length === 0) {
-      return 0;
-    }
-    const total = books.reduce((sum, book) => sum + (book.progressRatio ?? 0), 0);
-    return Math.round((total / books.length) * 100);
+  const startedCount = useMemo(() => {
+    return books.filter(hasReadingProgress).length;
   }, [books]);
 
   const refresh = useCallback(async () => {
@@ -240,8 +265,8 @@ export default function LibraryScreen() {
           </View>
           <View style={styles.metricDivider} />
           <View style={styles.metric}>
-            <Text style={styles.metricValue}>{averageProgress}%</Text>
-            <Text style={styles.metricLabel}>平均进度</Text>
+            <Text style={styles.metricValue}>{startedCount}</Text>
+            <Text style={styles.metricLabel}>已开始</Text>
           </View>
           <View style={styles.metricDivider} />
           <View style={styles.metric}>
@@ -291,16 +316,18 @@ export default function LibraryScreen() {
             </View>
             <View style={[styles.featuredDivider, { backgroundColor: theme.line }]} />
             <View style={styles.featuredCopy}>
-              <Text style={[styles.sectionKicker, { color: theme.accent }]}>继续阅读</Text>
+              <Text style={[styles.sectionKicker, { color: theme.accent }]}>{featuredStarted ? '继续阅读' : '最近导入'}</Text>
               <Text numberOfLines={2} style={[styles.featuredTitle, { color: theme.text }]}>
                 {featuredBook.title}
               </Text>
               <Text numberOfLines={1} style={[styles.featuredMeta, { color: theme.muted }]}>
                 {progressLabel(featuredBook)}
               </Text>
-              <View style={[styles.featuredProgressTrack, { backgroundColor: theme.line }]}>
-                <View style={[styles.featuredProgressFill, { width: `${Math.round((featuredBook.progressRatio ?? 0) * 100)}%`, backgroundColor: theme.accent }]} />
-              </View>
+              {featuredStarted && featuredProgressPercent !== null && featuredProgressPercent > 0 && (
+                <View style={[styles.featuredProgressTrack, { backgroundColor: theme.line }]}>
+                  <View style={[styles.featuredProgressFill, { width: `${featuredProgressPercent}%`, backgroundColor: theme.accent }]} />
+                </View>
+              )}
               <View style={[styles.readButton, { backgroundColor: theme.accent }]}>
                 <Text style={styles.readButtonText}>打开阅读器</Text>
               </View>
@@ -332,11 +359,9 @@ export default function LibraryScreen() {
           <IconButton icon="tray.and.arrow.down" label={importing ? '导入中' : '选择文件'} disabled={importing} onPress={handleImport} />
         </Animated.View>
       ) : (
-        <View style={[styles.grid, { gap: columns >= 3 ? 18 : 16 }]}>
+        <View style={styles.shelfList}>
           {filteredBooks.map((book, index) => (
-            <View key={book.id} style={{ width: `${100 / columns}%`, paddingHorizontal: columns >= 3 ? 9 : 8 }}>
-              <BookTile book={book} index={index} theme={activeTheme} onDelete={handleDelete} />
-            </View>
+            <BookTile key={book.id} book={book} index={index} theme={activeTheme} onDelete={handleDelete} />
           ))}
         </View>
       )}
@@ -631,35 +656,72 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -8,
+  shelfList: {
+    gap: 12,
   },
   tile: {
-    flex: 1,
-    gap: 12,
+    width: '100%',
   },
   tilePressable: {
-    gap: 12,
+    minHeight: 124,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 14,
+    boxShadow: '0 10px 24px rgba(48, 67, 82, 0.10)',
   },
   tileCopy: {
-    gap: 5,
+    flex: 1,
+    minWidth: 0,
+    gap: 7,
+  },
+  tileTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
   },
   tileTitle: {
     color: brand.colors.ink,
-    fontSize: 15,
-    lineHeight: 19,
+    flex: 1,
+    fontSize: 17,
+    lineHeight: 22,
     fontWeight: '900',
     letterSpacing: 0,
   },
   tileMeta: {
     color: brand.colors.muted,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
+  formatPill: {
+    minWidth: 44,
+    borderRadius: brand.radius.round,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    alignItems: 'center',
+  },
+  formatPillText: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  tileProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  tileStatus: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
   progressTrack: {
-    height: 4,
+    height: 5,
     borderRadius: brand.radius.round,
     backgroundColor: 'rgba(213, 222, 231, 0.9)',
     overflow: 'hidden',
@@ -671,7 +733,8 @@ const styles = StyleSheet.create({
   },
   progressText: {
     color: brand.colors.muted,
-    fontSize: 11,
+    flex: 1,
+    fontSize: 12,
     fontWeight: '800',
   },
   emptyState: {

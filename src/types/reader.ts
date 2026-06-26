@@ -58,6 +58,7 @@ export type LibraryBook = Book & {
   progressChapterId?: string | null;
   progressRatio?: number | null;
   currentChapterTitle?: string | null;
+  currentChapterOrder?: number | null;
 };
 
 export type SearchResult = {

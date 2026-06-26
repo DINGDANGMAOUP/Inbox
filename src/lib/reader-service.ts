@@ -26,6 +26,7 @@ type BookRow = {
   progress_chapter_id?: string | null;
   progress_ratio?: number | null;
   current_chapter_title?: string | null;
+  current_chapter_order?: number | null;
 };
 
 type ChapterRow = {
@@ -87,6 +88,7 @@ function mapLibraryBook(row: BookRow): LibraryBook {
     progressChapterId: row.progress_chapter_id,
     progressRatio: row.progress_ratio,
     currentChapterTitle: row.current_chapter_title,
+    currentChapterOrder: row.current_chapter_order,
   };
 }
 
@@ -252,7 +254,7 @@ export async function importBook(db: SQLiteDatabase) {
       stored.fileUri,
       null,
       now,
-      now,
+      null,
       stored.chapters.length
     );
 
@@ -279,15 +281,6 @@ export async function importBook(db: SQLiteDatabase) {
         chapter.text
       );
     }
-
-    await db.runAsync(
-      `INSERT INTO reading_progress (book_id, chapter_id, scroll_ratio, updated_at)
-       VALUES (?, ?, ?, ?)`,
-      stored.id,
-      stored.chapters[0].id,
-      0,
-      now
-    );
   });
 
   return getBook(db, stored.id);
@@ -298,7 +291,8 @@ export async function listBooks(db: SQLiteDatabase) {
     `SELECT b.*,
             p.chapter_id AS progress_chapter_id,
             p.scroll_ratio AS progress_ratio,
-            c.title AS current_chapter_title
+            c.title AS current_chapter_title,
+            c.chapter_order AS current_chapter_order
        FROM books b
        LEFT JOIN reading_progress p ON p.book_id = b.id
        LEFT JOIN chapters c ON c.id = p.chapter_id

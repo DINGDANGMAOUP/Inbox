@@ -27,6 +27,7 @@ type BookCoverProps = {
 export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
   const coverTheme = theme ?? themeFor(book.id);
   const themeToken = brand.themes[coverTheme];
+  const compact = size === 'small';
   const textColor = coverTheme === 'deep' ? brand.colors.white : themeToken.text;
   const quietTextColor = coverTheme === 'deep' ? 'rgba(255, 255, 255, 0.74)' : themeToken.muted;
   const titleStyle = size === 'hero' ? styles.heroTitle : size === 'small' ? styles.smallTitle : styles.gridTitle;
@@ -39,19 +40,21 @@ export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
       <Image source={themeAssets[coverTheme].cover} contentFit="cover" transition={160} style={StyleSheet.absoluteFill} />
       <View style={[styles.scrim, coverTheme === 'deep' && styles.deepScrim]} />
       <View style={[styles.spine, { backgroundColor: themeToken.accent }]} />
-      <View style={styles.islandMark}>
+      <View style={[styles.islandMark, compact && styles.smallIslandMark]}>
         <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.islandMarkImage} />
       </View>
-      <Text style={[styles.brandText, { color: quietTextColor }]}>INBOX</Text>
-      <Text style={[styles.format, { color: quietTextColor }]}>{book.format.toUpperCase()}</Text>
-      <View style={[styles.copy, copyStyle]}>
-        <Text numberOfLines={size === 'small' ? 2 : 3} style={[styles.title, titleStyle, { color: textColor }]}>
-          {book.title}
-        </Text>
-        <Text numberOfLines={1} style={[styles.author, { color: quietTextColor }]}>
-          {authorLabel(book.author)}
-        </Text>
-      </View>
+      {!compact && <Text style={[styles.brandText, { color: quietTextColor }]}>INBOX</Text>}
+      <Text style={[styles.format, compact && styles.smallFormat, { color: quietTextColor }]}>{book.format.toUpperCase()}</Text>
+      {!compact && (
+        <View style={[styles.copy, copyStyle]}>
+          <Text numberOfLines={3} style={[styles.title, titleStyle, { color: textColor }]}>
+            {book.title}
+          </Text>
+          <Text numberOfLines={1} style={[styles.author, { color: quietTextColor }]}>
+            {authorLabel(book.author)}
+          </Text>
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -74,8 +77,8 @@ const styles = StyleSheet.create({
     aspectRatio: 0.68,
   },
   small: {
-    width: 62,
-    height: 92,
+    width: 72,
+    height: 104,
   },
   spine: {
     position: 'absolute',
@@ -106,6 +109,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     boxShadow: '0 6px 14px rgba(31, 49, 61, 0.18)',
   },
+  smallIslandMark: {
+    right: 9,
+    top: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+  },
   islandMarkImage: {
     width: '100%',
     height: '100%',
@@ -127,6 +137,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
     opacity: 0.82,
+  },
+  smallFormat: {
+    left: 15,
+    top: 18,
+    fontSize: 9,
   },
   copy: {
     flex: 1,
