@@ -55,6 +55,11 @@ const themeLabels: Record<ReaderPreferences['theme'], string> = {
   reading: '阅读',
 };
 
+const readingModeLabels: Record<ReaderPreferences['readingMode'], string> = {
+  scroll: '连续滚动',
+  page: '横向翻页',
+};
+
 function chapterLabel(title: string) {
   return cleanChapterTitle(title, '正文')
     .replace(/^Part\s+(\d+)$/i, '第 $1 部分')
@@ -167,11 +172,6 @@ function readerScript() {
         offset: selectedText ? document.body.innerText.indexOf(selectedText) : -1
       }));
     };
-    document.body.addEventListener("click", function(event) {
-      if (event.target.tagName !== "A") {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: "toggleChrome" }));
-      }
-    });
     window.addEventListener("scroll", function() {
       var max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
       window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -182,29 +182,205 @@ function readerScript() {
   </script>`;
 }
 
-function preferenceScript(preferences: ReaderPreferences, restoreRatio: number) {
+function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, reduceMotion: boolean) {
   const theme = themeValues[preferences.theme];
   return `
-    document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
-    document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
-    document.documentElement.style.setProperty("--reader-bg", "${theme.bg}");
-    document.documentElement.style.setProperty("--reader-text", "${theme.text}");
-    document.body.style.paddingLeft = "${preferences.margin}px";
-    document.body.style.paddingRight = "${preferences.margin}px";
-    document.body.style.paddingTop = "132px";
-    document.body.style.paddingBottom = "330px";
-    if (!window.__INBOX_SCRIPT_READY__) {
-      window.__INBOX_SCRIPT_READY__ = true;
-      document.body.addEventListener("click", function(event) {
-        if (event.target.tagName !== "A") {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: "toggleChrome" }));
+    (function() {
+      var mode = "${preferences.readingMode}";
+      var margin = ${preferences.margin};
+      var reduceMotion = ${reduceMotion ? 'true' : 'false'};
+      var restoreRatio = ${restoreRatio};
+
+      function postMessage(payload) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+      }
+
+      function pageStep() {
+        return Math.max(1, window.innerWidth);
+      }
+
+      function maxHorizontalScroll() {
+        return Math.max(0, document.documentElement.scrollWidth - window.innerWidth);
+      }
+
+      function maxVerticalScroll() {
+        return Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      }
+
+      function pageCount() {
+        return Math.max(1, Math.round(maxHorizontalScroll() / pageStep()) + 1);
+      }
+
+      function pageIndex() {
+        return Math.min(pageCount() - 1, Math.max(0, Math.round(window.scrollX / pageStep())));
+      }
+
+      function reportProgress() {
+        if (mode === "page") {
+          var total = pageCount();
+          var page = pageIndex();
+          postMessage({
+            type: "progress",
+            ratio: total <= 1 ? 0 : page / Math.max(1, total - 1),
+            pageIndex: page + 1,
+            pageCount: total
+          });
+          return;
         }
-      });
-    }
-    setTimeout(function() {
-      var max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-      window.scrollTo({ top: ${restoreRatio} * max, behavior: "auto" });
-    }, 180);
+
+        postMessage({
+          type: "progress",
+          ratio: Math.min(1, Math.max(0, window.scrollY / maxVerticalScroll()))
+        });
+      }
+
+      function applyMode() {
+        document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
+        document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
+        document.documentElement.style.setProperty("--reader-bg", "${theme.bg}");
+        document.documentElement.style.setProperty("--reader-text", "${theme.text}");
+        document.documentElement.style.background = "${theme.bg}";
+        document.body.style.background = "${theme.bg}";
+        document.body.style.color = "${theme.text}";
+        document.body.style.fontSize = "${preferences.fontSize}px";
+        document.body.style.lineHeight = "${preferences.lineHeight}";
+        document.body.style.boxSizing = "border-box";
+        document.body.style.paddingLeft = margin + "px";
+        document.body.style.paddingRight = margin + "px";
+
+        if (mode === "page") {
+          document.documentElement.style.height = "100%";
+          document.documentElement.style.overflowX = "hidden";
+          document.documentElement.style.overflowY = "hidden";
+          document.body.style.minHeight = "100vh";
+          document.body.style.height = "100vh";
+          document.body.style.overflow = "visible";
+          document.body.style.paddingTop = "112px";
+          document.body.style.paddingBottom = "118px";
+          document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+          document.body.style.columnGap = margin * 2 + "px";
+          document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+          document.body.style.webkitColumnGap = margin * 2 + "px";
+          return;
+        }
+
+        document.documentElement.style.height = "auto";
+        document.documentElement.style.overflowX = "hidden";
+        document.documentElement.style.overflowY = "auto";
+        document.body.style.minHeight = "auto";
+        document.body.style.height = "auto";
+        document.body.style.overflow = "visible";
+        document.body.style.paddingTop = "132px";
+        document.body.style.paddingBottom = "330px";
+        document.body.style.columnWidth = "auto";
+        document.body.style.columnGap = "normal";
+        document.body.style.webkitColumnWidth = "auto";
+        document.body.style.webkitColumnGap = "normal";
+      }
+
+      window.__INBOX_GO_PAGE = function(delta) {
+        if (mode !== "page") {
+          return;
+        }
+        var total = pageCount();
+        var next = pageIndex() + delta;
+        if (next < 0) {
+          postMessage({ type: "pageBoundary", direction: "prev" });
+          return;
+        }
+        if (next >= total) {
+          postMessage({ type: "pageBoundary", direction: "next" });
+          return;
+        }
+        window.scrollTo({ left: next * pageStep(), top: 0, behavior: "auto" });
+        setTimeout(reportProgress, 40);
+      };
+
+      window.__INBOX_REPORT_PROGRESS = reportProgress;
+
+      if (!window.__INBOX_SCRIPT_READY__) {
+        window.__INBOX_SCRIPT_READY__ = true;
+        var progressTimer = null;
+        var lastTouchAt = 0;
+
+        function tapRatio(point) {
+          var screenWidth = window.screen && window.screen.width ? window.screen.width : 0;
+          if (point && Number.isFinite(point.screenX) && screenWidth > 0) {
+            return Math.min(1, Math.max(0, point.screenX / screenWidth));
+          }
+
+          return Math.min(1, Math.max(0, point.clientX / Math.max(1, window.innerWidth)));
+        }
+
+        function handleReaderTap(event, point) {
+          var target = event.target;
+          if (target && target.closest && target.closest("a")) {
+            return;
+          }
+          var selection = window.getSelection ? window.getSelection().toString().trim() : "";
+          if (selection) {
+            return;
+          }
+          if (mode === "page") {
+            var ratio = tapRatio(point);
+            if (ratio < 0.28) {
+              window.__INBOX_GO_PAGE(-1);
+              return;
+            }
+            if (ratio > 0.72) {
+              window.__INBOX_GO_PAGE(1);
+              return;
+            }
+          }
+          postMessage({ type: "toggleChrome" });
+        }
+
+        document.addEventListener("touchend", function(event) {
+          var touch = event.changedTouches && event.changedTouches[0];
+          if (!touch) {
+            return;
+          }
+          lastTouchAt = Date.now();
+          handleReaderTap(event, touch);
+        }, { passive: true, capture: true });
+
+        document.addEventListener("click", function(event) {
+          if (Date.now() - lastTouchAt < 450) {
+            return;
+          }
+          handleReaderTap(event, event);
+        });
+        window.addEventListener("scroll", function() {
+          if (progressTimer) {
+            clearTimeout(progressTimer);
+          }
+          progressTimer = setTimeout(reportProgress, 80);
+        }, { passive: true });
+        window.addEventListener("resize", function() {
+          var ratio = mode === "page" ? (pageCount() <= 1 ? 0 : pageIndex() / Math.max(1, pageCount() - 1)) : window.scrollY / maxVerticalScroll();
+          applyMode();
+          setTimeout(function() {
+            if (mode === "page") {
+              window.scrollTo({ left: Math.round(ratio * Math.max(1, pageCount() - 1)) * pageStep(), top: 0, behavior: "auto" });
+            } else {
+              window.scrollTo({ left: 0, top: ratio * maxVerticalScroll(), behavior: "auto" });
+            }
+            reportProgress();
+          }, 80);
+        });
+      }
+
+      applyMode();
+      setTimeout(function() {
+        if (mode === "page") {
+          var targetPage = Math.round(restoreRatio * Math.max(1, pageCount() - 1));
+          window.scrollTo({ left: targetPage * pageStep(), top: 0, behavior: "auto" });
+        } else {
+          window.scrollTo({ left: 0, top: restoreRatio * maxVerticalScroll(), behavior: "auto" });
+        }
+        reportProgress();
+      }, 180);
+    })();
     true;
   `;
 }
@@ -244,6 +420,7 @@ export default function ReaderScreen() {
     fontSize: 19,
     lineHeight: 1.7,
     margin: 22,
+    readingMode: 'scroll',
   });
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [panel, setPanel] = useState<Panel>(null);
@@ -254,6 +431,7 @@ export default function ReaderScreen() {
   const [loading, setLoading] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pageStatus, setPageStatus] = useState({ pageIndex: 1, pageCount: 1 });
 
   const currentChapter = chapters[currentIndex];
   const readerTheme = themeValues[preferences.theme];
@@ -373,21 +551,22 @@ export default function ReaderScreen() {
   );
 
   const goToChapter = useCallback(
-    (index: number) => {
+    (index: number, ratio = 0) => {
       if (!book || !chapters[index]) {
         return;
       }
       setCurrentIndex(index);
-      setRestoreRatio(0);
+      setRestoreRatio(ratio);
+      setPageStatus({ pageIndex: 1, pageCount: 1 });
       setPanel(null);
-      saveProgress(db, book.id, chapters[index].id, 0);
+      saveProgress(db, book.id, chapters[index].id, ratio);
     },
     [book, chapters, db]
   );
 
   const handleWebMessage = useCallback(
     async (event: WebViewMessageEvent) => {
-      let payload: { type?: string; ratio?: number; selectedText?: string; offset?: number };
+      let payload: { type?: string; ratio?: number; selectedText?: string; offset?: number; pageIndex?: number; pageCount?: number; direction?: 'prev' | 'next' };
       try {
         payload = JSON.parse(event.nativeEvent.data);
       } catch {
@@ -399,7 +578,24 @@ export default function ReaderScreen() {
       }
 
       if (payload.type === 'progress' && typeof payload.ratio === 'number') {
+        if (preferences.readingMode === 'page' && (typeof payload.pageIndex !== 'number' || typeof payload.pageCount !== 'number')) {
+          return;
+        }
+        if (typeof payload.pageIndex === 'number' && typeof payload.pageCount === 'number') {
+          setPageStatus({
+            pageIndex: Math.max(1, payload.pageIndex),
+            pageCount: Math.max(1, payload.pageCount),
+          });
+        }
         commitProgress(payload.ratio);
+      }
+
+      if (payload.type === 'pageBoundary' && payload.direction === 'prev') {
+        showNotice(currentIndex > 0 ? '已经是本章第一页，点上一章切换章节' : '已经是第一章');
+      }
+
+      if (payload.type === 'pageBoundary' && payload.direction === 'next') {
+        showNotice(currentIndex < chapters.length - 1 ? '本章已结束，点下一章继续' : '已经读到最后一章');
       }
 
       if (payload.type === 'selection-empty') {
@@ -420,10 +616,10 @@ export default function ReaderScreen() {
         setPanel('notes');
       }
     },
-    [book, commitProgress, currentChapter, db, showNotice]
+    [book, chapters.length, commitProgress, currentChapter, currentIndex, db, preferences.readingMode, showNotice]
   );
 
-  const injectedJavaScript = useMemo(() => preferenceScript(preferences, restoreRatio), [preferences, restoreRatio]);
+  const injectedJavaScript = useMemo(() => preferenceScript(preferences, restoreRatio, reduceMotion), [preferences, reduceMotion, restoreRatio]);
 
   const saveNote = useCallback(async () => {
     if (!book || !currentChapter || !noteDraft.trim()) {
@@ -470,6 +666,7 @@ export default function ReaderScreen() {
   const updatePreference = useCallback(
     async (next: ReaderPreferences) => {
       setPreferences(next);
+      setPageStatus({ pageIndex: 1, pageCount: 1 });
       await updateReaderPreferences(db, next);
     },
     [db]
@@ -502,7 +699,7 @@ export default function ReaderScreen() {
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
           <WebView
-            key={`${currentChapter.id}-${preferences.theme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}`}
+            key={`${currentChapter.id}-${preferences.theme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
             ref={webViewRef}
             originWhitelist={['*']}
             source={readerSource}
@@ -532,6 +729,7 @@ export default function ReaderScreen() {
               </Text>
               <Text numberOfLines={1} style={[styles.chromeMeta, { color: chromeTheme.muted }]}>
                 {chapterLabel(currentChapter.title)}
+                {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
               </Text>
             </View>
             <Text style={[styles.chapterCount, { color: chromeTheme.accent }]}>
@@ -554,7 +752,7 @@ export default function ReaderScreen() {
                 icon="chevron.left"
                 label="上一章"
                 disabled={currentIndex === 0}
-                onPress={() => goToChapter(Math.max(0, currentIndex - 1))}
+                onPress={() => goToChapter(Math.max(0, currentIndex - 1), preferences.readingMode === 'page' ? 1 : 0)}
               />
               <IconButton
                 style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
@@ -562,7 +760,7 @@ export default function ReaderScreen() {
                 icon="chevron.right"
                 label="下一章"
                 disabled={currentIndex >= chapters.length - 1}
-                onPress={() => goToChapter(Math.min(chapters.length - 1, currentIndex + 1))}
+                onPress={() => goToChapter(Math.min(chapters.length - 1, currentIndex + 1), 0)}
               />
             </View>
             <View style={styles.toolRow}>
@@ -719,6 +917,21 @@ export default function ReaderScreen() {
 
             {panel === 'settings' && (
               <View style={styles.settingsPanel}>
+                <View style={[styles.modeSwitch, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                  {(['scroll', 'page'] as const).map((mode) => {
+                    const active = preferences.readingMode === mode;
+                    return (
+                      <Pressable
+                        key={mode}
+                        onPress={() => updatePreference({ ...preferences, readingMode: mode })}
+                        style={[styles.modeButton, active && { backgroundColor: chromeTheme.accent }]}>
+                        <Text style={[styles.modeButtonText, { color: active ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text }]}>
+                          {readingModeLabels[mode]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
                 <View style={styles.themeRow}>
                   {brand.themeOrder.map((theme) => (
                     <Pressable
@@ -1048,6 +1261,29 @@ const styles = StyleSheet.create({
   },
   settingsPanel: {
     gap: 14,
+  },
+  modeSwitch: {
+    minHeight: 48,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    padding: 4,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  modeButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  modeButtonText: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   themeRow: {
     flexDirection: 'row',

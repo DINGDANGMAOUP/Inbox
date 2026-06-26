@@ -4,6 +4,8 @@ export type AnnotationType = 'bookmark' | 'highlight' | 'note';
 
 export type ReaderTheme = 'mist' | 'deep' | 'reading';
 
+export type ReadingMode = 'scroll' | 'page';
+
 export type Book = {
   id: string;
   title: string;
@@ -52,6 +54,7 @@ export type ReaderPreferences = {
   fontSize: number;
   lineHeight: number;
   margin: number;
+  readingMode: ReadingMode;
 };
 
 export type LibraryBook = Book & {

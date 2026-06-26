@@ -38,7 +38,6 @@ export function IconButton({ icon, label, tintColor, tone = 'dark', style, ...pr
   const resolvedTintColor = tintColor ?? (tone === 'light' || tone === 'filled' ? brand.colors.white : brand.colors.ink);
   const androidIcon = androidIcons[icon] ?? AddIcon;
   const disabled = props.disabled;
-
   return (
     <Pressable
       accessibilityLabel={label}

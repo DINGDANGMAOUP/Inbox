@@ -1,14 +1,10 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 
 export async function migrateReaderDb(db: SQLiteDatabase) {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = row?.user_version ?? 0;
-
-  if (currentVersion >= DATABASE_VERSION) {
-    return;
-  }
 
   await db.execAsync(`
     PRAGMA journal_mode = 'wal';
@@ -82,11 +78,10 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
       theme TEXT NOT NULL,
       font_size INTEGER NOT NULL,
       line_height REAL NOT NULL,
-      margin INTEGER NOT NULL
+      margin INTEGER NOT NULL,
+      reading_mode TEXT NOT NULL DEFAULT 'scroll'
     );
 
-    INSERT OR IGNORE INTO reader_preferences (id, theme, font_size, line_height, margin)
-    VALUES ('default', 'mist', 19, 1.7, 22);
   `);
 
   if (currentVersion < 2) {
@@ -107,6 +102,16 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
          AND id NOT IN (SELECT book_id FROM reading_progress);
     `);
   }
+
+  const preferenceColumns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(reader_preferences)');
+  if (!preferenceColumns.some((column) => column.name === 'reading_mode')) {
+    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN reading_mode TEXT NOT NULL DEFAULT 'scroll';`);
+  }
+
+  await db.runAsync(
+    `INSERT OR IGNORE INTO reader_preferences (id, theme, font_size, line_height, margin, reading_mode)
+     VALUES ('default', 'mist', 19, 1.7, 22, 'scroll')`
+  );
 
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
 }

@@ -68,6 +68,10 @@ function normalizeReaderTheme(theme?: string | null): ReaderPreferences['theme']
   return 'mist';
 }
 
+function normalizeReadingMode(mode?: string | null): ReaderPreferences['readingMode'] {
+  return mode === 'page' ? 'page' : 'scroll';
+}
+
 function mapBook(row: BookRow): Book {
   return {
     id: row.id,
@@ -425,29 +429,33 @@ export async function getReaderPreferences(db: SQLiteDatabase): Promise<ReaderPr
     font_size: number;
     line_height: number;
     margin: number;
-  }>('SELECT theme, font_size, line_height, margin FROM reader_preferences WHERE id = ?', 'default');
+    reading_mode: string | null;
+  }>('SELECT theme, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?', 'default');
 
   return {
     theme: normalizeReaderTheme(row?.theme),
     fontSize: row?.font_size ?? 19,
     lineHeight: row?.line_height ?? 1.7,
     margin: row?.margin ?? 22,
+    readingMode: normalizeReadingMode(row?.reading_mode),
   };
 }
 
 export async function updateReaderPreferences(db: SQLiteDatabase, preferences: ReaderPreferences) {
   await db.runAsync(
-    `INSERT INTO reader_preferences (id, theme, font_size, line_height, margin)
-     VALUES ('default', ?, ?, ?, ?)
+    `INSERT INTO reader_preferences (id, theme, font_size, line_height, margin, reading_mode)
+     VALUES ('default', ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        theme = excluded.theme,
        font_size = excluded.font_size,
        line_height = excluded.line_height,
-       margin = excluded.margin`,
+       margin = excluded.margin,
+       reading_mode = excluded.reading_mode`,
     preferences.theme,
     preferences.fontSize,
     preferences.lineHeight,
-    preferences.margin
+    preferences.margin,
+    preferences.readingMode
   );
 }
 
