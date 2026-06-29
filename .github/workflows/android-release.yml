@@ -30,6 +30,7 @@ jobs:
   build-release-apk:
     name: Build and publish APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -64,6 +65,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -89,7 +93,7 @@ jobs:
         run: |
           cd android
           chmod +x ./gradlew
-          ./gradlew --no-daemon assembleRelease \
+          ./gradlew --no-daemon --console=plain --stacktrace --info assembleRelease \
             -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/signing/release.keystore" \
             -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
