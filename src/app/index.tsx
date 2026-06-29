@@ -20,6 +20,7 @@ import { IconButton } from '@/components/reader/icon-button';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
 import { themeAssets } from '@/constants/theme-assets';
+import { useReaderPreferences } from '@/hooks/use-reader-preferences';
 import { cleanChapterTitle } from '@/lib/text-utils';
 import { deleteBook, importBook, listBooks } from '@/lib/reader-service';
 import type { LibraryBook, ReaderTheme } from '@/types/reader';
@@ -72,37 +73,6 @@ function BrandSeal() {
   return (
     <View style={styles.brandSeal}>
       <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.brandSealImage} />
-    </View>
-  );
-}
-
-function ThemeSwitch({
-  activeTheme,
-  onChange,
-}: {
-  activeTheme: ReaderTheme;
-  onChange: (theme: ReaderTheme) => void;
-}) {
-  return (
-    <View style={styles.themeSwitch}>
-      {brand.themeOrder.map((theme) => {
-        const themeToken = brand.themes[theme];
-        const active = activeTheme === theme;
-
-        return (
-          <Pressable
-            key={theme}
-            onPress={() => onChange(theme)}
-            style={[
-              styles.themePill,
-              { borderColor: active ? themeToken.accent : themeToken.line, backgroundColor: active ? themeToken.accent : themeToken.surface },
-            ]}>
-            <Image source={themeAssets[theme].cover} contentFit="cover" style={styles.themePillImage} />
-            <View style={styles.themePillScrim} />
-            <Text style={[styles.themePillText, { color: active ? themeToken.accentText : themeToken.text }]}>{themeToken.label}</Text>
-          </Pressable>
-        );
-      })}
     </View>
   );
 }
@@ -165,15 +135,17 @@ function BookTile({
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
+  const { preferences } = useReaderPreferences();
   const [books, setBooks] = useState<LibraryBook[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [activeTheme, setActiveTheme] = useState<ReaderTheme>('mist');
+  const activeTheme = preferences.theme;
   const theme = brand.themes[activeTheme];
-  const ambientTextColor = activeTheme === 'deep' ? brand.colors.white : brand.colors.ink;
-  const ambientMutedColor = activeTheme === 'deep' ? 'rgba(247, 248, 251, 0.72)' : brand.colors.muted;
+  const isDeepTheme = activeTheme === 'deep';
+  const ambientTextColor = isDeepTheme ? brand.colors.white : theme.text;
+  const ambientMutedColor = isDeepTheme ? 'rgba(255, 255, 255, 0.76)' : theme.muted;
 
   const filteredBooks = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
@@ -242,7 +214,13 @@ export default function LibraryScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
-      <Image source={themeAssets[activeTheme].background} contentFit="cover" transition={180} style={StyleSheet.absoluteFill} />
+      <Image
+        key={`library-background-${activeTheme}`}
+        source={themeAssets[activeTheme].background}
+        contentFit="cover"
+        transition={180}
+        style={StyleSheet.absoluteFill}
+      />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]} />
       <ScrollView
         style={styles.scroller}
@@ -258,24 +236,29 @@ export default function LibraryScreen() {
               <Text style={[styles.title, { color: ambientTextColor }]}>墨屿</Text>
             </View>
           </View>
-          <IconButton tone="filled" icon="plus" label={importing ? '导入中' : '导入'} disabled={importing} onPress={handleImport} />
+          <View style={styles.actionColumn}>
+            <IconButton tone="filled" icon="plus" label={importing ? '导入中' : '导入'} disabled={importing} onPress={handleImport} />
+            <View style={styles.utilityRow}>
+              <IconButton tone="quiet" icon="settings" label="设置" onPress={() => router.push('/settings')} />
+              <IconButton tone="quiet" icon="info" label="关于" onPress={() => router.push('/about')} />
+            </View>
+          </View>
         </View>
         <Text style={[styles.tagline, { color: ambientMutedColor }]}>把 EPUB 与 TXT 收进本机，一座只属于你的安静书岛。</Text>
-        <ThemeSwitch activeTheme={activeTheme} onChange={setActiveTheme} />
-        <View style={styles.metricRow}>
+        <View style={[styles.metricRow, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           <View style={styles.metric}>
-            <Text style={styles.metricValue}>{books.length}</Text>
-            <Text style={styles.metricLabel}>本机藏书</Text>
+            <Text style={[styles.metricValue, { color: theme.text }]}>{books.length}</Text>
+            <Text style={[styles.metricLabel, { color: theme.muted }]}>本机藏书</Text>
           </View>
-          <View style={styles.metricDivider} />
+          <View style={[styles.metricDivider, { backgroundColor: theme.line }]} />
           <View style={styles.metric}>
-            <Text style={styles.metricValue}>{startedCount}</Text>
-            <Text style={styles.metricLabel}>已开始</Text>
+            <Text style={[styles.metricValue, { color: theme.text }]}>{startedCount}</Text>
+            <Text style={[styles.metricLabel, { color: theme.muted }]}>已开始</Text>
           </View>
-          <View style={styles.metricDivider} />
+          <View style={[styles.metricDivider, { backgroundColor: theme.line }]} />
           <View style={styles.metric}>
-            <Text style={styles.metricValue}>离线</Text>
-            <Text style={styles.metricLabel}>阅读模式</Text>
+            <Text style={[styles.metricValue, { color: theme.text }]}>离线</Text>
+            <Text style={[styles.metricLabel, { color: theme.muted }]}>阅读模式</Text>
           </View>
         </View>
       </View>
@@ -284,9 +267,9 @@ export default function LibraryScreen() {
         value={query}
         onChangeText={setQuery}
         placeholder="搜索书架"
-        placeholderTextColor={brand.colors.muted}
+        placeholderTextColor={theme.muted}
         autoCapitalize="none"
-        style={styles.search}
+        style={[styles.search, { backgroundColor: theme.surfaceSolid, borderColor: theme.line, color: theme.text }]}
       />
 
       {notice && (
@@ -298,10 +281,13 @@ export default function LibraryScreen() {
       )}
 
       {!!query.trim() && (
-        <Animated.View entering={FadeInDown.duration(160)} exiting={FadeOut.duration(120)} style={styles.searchContext}>
-          <Text style={styles.searchContextText}>正在筛选书架</Text>
+        <Animated.View
+          entering={FadeInDown.duration(160)}
+          exiting={FadeOut.duration(120)}
+          style={[styles.searchContext, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+          <Text style={[styles.searchContextText, { color: theme.accent }]}>正在筛选书架</Text>
           <Pressable onPress={() => setQuery('')} hitSlop={8} style={({ pressed }) => pressed && styles.pressed}>
-            <Text style={styles.clearSearchText}>清除</Text>
+            <Text style={[styles.clearSearchText, { color: theme.text }]}>清除</Text>
           </Pressable>
         </Animated.View>
       )}
@@ -342,22 +328,22 @@ export default function LibraryScreen() {
 
       <View style={styles.sectionHeader}>
         <View>
-          <Text style={styles.sectionKickerDark}>LIBRARY</Text>
+          <Text style={[styles.sectionKickerDark, { color: isDeepTheme ? 'rgba(255, 255, 255, 0.68)' : theme.accent }]}>LIBRARY</Text>
           <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>书架</Text>
         </View>
         <Text style={[styles.count, { color: ambientMutedColor }]}>{filteredBooks.length} 本书</Text>
       </View>
 
       {loading && books.length === 0 ? (
-        <View style={styles.emptyState}>
-          <ActivityIndicator color={brand.colors.ink} />
-          <Text style={styles.emptyTitle}>正在整理书架</Text>
+        <View style={[styles.emptyState, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+          <ActivityIndicator color={theme.accent} />
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>正在整理书架</Text>
         </View>
       ) : filteredBooks.length === 0 ? (
-        <Animated.View entering={FadeInDown.duration(260)} style={styles.emptyState}>
+        <Animated.View entering={FadeInDown.duration(260)} style={[styles.emptyState, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
           <BrandSeal />
-          <Text style={styles.emptyTitle}>{query ? '没有匹配的书' : '导入第一本书'}</Text>
-          <Text style={styles.emptyBody}>
+          <Text style={[styles.emptyTitle, { color: theme.text }]}>{query ? '没有匹配的书' : '导入第一本书'}</Text>
+          <Text style={[styles.emptyBody, { color: theme.muted }]}>
             EPUB 和 TXT 文件只保存在这台设备上。阅读进度、搜索索引、划线和笔记都会离线保存。
           </Text>
           <IconButton icon="tray.and.arrow.down" label={importing ? '导入中' : '选择文件'} disabled={importing} onPress={handleImport} />
@@ -396,7 +382,7 @@ const styles = StyleSheet.create({
   hero: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 14,
   },
   brandRow: {
@@ -444,40 +430,13 @@ const styles = StyleSheet.create({
     maxWidth: 330,
     fontWeight: '600',
   },
-  themeSwitch: {
-    flexDirection: 'row',
+  actionColumn: {
+    alignItems: 'flex-end',
     gap: 8,
   },
-  themePill: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  themePillImage: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    opacity: 0.44,
-  },
-  themePillScrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(247, 248, 251, 0.24)',
-  },
-  themePillText: {
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0,
+  utilityRow: {
+    flexDirection: 'row',
+    gap: 7,
   },
   metricRow: {
     flexDirection: 'row',

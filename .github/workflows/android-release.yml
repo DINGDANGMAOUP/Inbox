@@ -1,0 +1,145 @@
+name: Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App versionName, for example 1.0.1
+        required: true
+        type: string
+      buildNumber:
+        description: Android versionCode, must increase every release
+        required: true
+        type: string
+      releaseNotes:
+        description: Release notes shown in the app
+        required: false
+        type: string
+      force:
+        description: Mark this release as a forced update in latest.json
+        required: true
+        default: false
+        type: boolean
+      prerelease:
+        description: Create as GitHub prerelease
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  build-release-apk:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+      BUILD_NUMBER: ${{ inputs.buildNumber }}
+      RELEASE_NOTES: ${{ inputs.releaseNotes }}
+      FORCE_UPDATE: ${{ inputs.force }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate signing secrets
+        run: |
+          missing=0
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Stamp app version
+        run: node scripts/set-android-release-version.mjs "$VERSION" "$BUILD_NUMBER"
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --clean --no-install --non-interactive
+
+      - name: Restore signing key
+        run: |
+          mkdir -p android/app/signing
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/signing/release.keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Build release APK
+        run: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleRelease \
+            -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/signing/release.keystore" \
+            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          APK_NAME="Inbox-${VERSION}-${BUILD_NUMBER}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "release/$APK_NAME"
+          APK_SIZE="$(wc -c < "release/$APK_NAME" | tr -d ' ')"
+          TAG="android-v${VERSION}+${BUILD_NUMBER}"
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
+          export APK_SIZE APK_URL TAG
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const payload = {
+            version: process.env.VERSION,
+            buildNumber: Number(process.env.BUILD_NUMBER),
+            minSupportedBuild: 1,
+            apkUrl: process.env.APK_URL,
+            apkSize: Number(process.env.APK_SIZE),
+            releaseNotes: process.env.RELEASE_NOTES || '这个版本没有填写更新说明。',
+            force: process.env.FORCE_UPDATE === 'true',
+            publishedAt: new Date().toISOString(),
+            tagName: process.env.TAG,
+            releaseUrl: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/tag/${process.env.TAG}`,
+          };
+          fs.writeFileSync('release/latest.json', `${JSON.stringify(payload, null, 2)}\n`);
+          fs.writeFileSync('release/release-notes.md', payload.releaseNotes);
+          NODE
+
+      - name: Publish GitHub Release
+        run: |
+          TAG="android-v${VERSION}+${BUILD_NUMBER}"
+          FLAGS=()
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease)
+          else
+            FLAGS+=(--latest)
+          fi
+          gh release create "$TAG" \
+            "release/Inbox-${VERSION}-${BUILD_NUMBER}.apk" \
+            "release/latest.json" \
+            --title "墨屿 Android ${VERSION} (${BUILD_NUMBER})" \
+            --notes-file release/release-notes.md \
+            "${FLAGS[@]}"
+        env:
+          GH_TOKEN: ${{ github.token }}

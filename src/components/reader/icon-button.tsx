@@ -6,22 +6,30 @@ import AddIcon from '@expo/material-symbols/add.xml';
 import ArrowBackIcon from '@expo/material-symbols/arrow_back.xml';
 import ArrowForwardIcon from '@expo/material-symbols/arrow_forward.xml';
 import BookmarkIcon from '@expo/material-symbols/bookmark.xml';
+import ChevronRightIcon from '@expo/material-symbols/chevron_right.xml';
 import DrawIcon from '@expo/material-symbols/draw.xml';
 import FileOpenIcon from '@expo/material-symbols/file_open.xml';
+import InfoIcon from '@expo/material-symbols/info.xml';
 import ListIcon from '@expo/material-symbols/format_list_bulleted.xml';
 import SearchIcon from '@expo/material-symbols/search.xml';
+import SettingsIcon from '@expo/material-symbols/settings.xml';
+import StickyNoteIcon from '@expo/material-symbols/sticky_note.xml';
 import TextFieldsIcon from '@expo/material-symbols/text_fields.xml';
 
 import { brand } from '@/constants/brand';
 
 const androidIcons: Record<string, ImageSourcePropType> = {
   bookmark: BookmarkIcon,
+  chevron: ChevronRightIcon,
   'chevron.left': ArrowBackIcon,
   'chevron.right': ArrowForwardIcon,
   highlighter: DrawIcon,
+  info: InfoIcon,
   'list.bullet': ListIcon,
   magnifyingglass: SearchIcon,
   plus: AddIcon,
+  settings: SettingsIcon,
+  note: StickyNoteIcon,
   'textformat.size': TextFieldsIcon,
   'tray.and.arrow.down': FileOpenIcon,
 };

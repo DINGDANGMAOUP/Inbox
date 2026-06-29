@@ -37,6 +37,18 @@ export default function RootLayout() {
             }}>
             <Stack.Screen name="index" />
             <Stack.Screen
+              name="settings"
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="about"
+              options={{
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
               name="reader/[id]"
               options={{
                 animation: 'fade_from_bottom',

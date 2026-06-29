@@ -2,7 +2,7 @@
   "expo": {
     "name": "墨屿",
     "slug": "Inbox",
-    "version": "1.0.0",
+    "version": "0.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "inbox",
@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.dingdangmaoup.inkbox",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E8EBF2",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -22,7 +23,8 @@
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ]
     },
     "web": {
@@ -53,6 +55,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "githubUpdates": {
+        "owner": "DINGDANGMAOUP",
+        "repo": "Inbox"
+      }
     }
   }
 }

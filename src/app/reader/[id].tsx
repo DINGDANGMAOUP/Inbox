@@ -36,6 +36,7 @@ import { cleanChapterTitle } from '@/lib/text-utils';
 import type { Annotation, Book, Chapter, ReaderPreferences, SearchResult } from '@/types/reader';
 
 type Panel = 'toc' | 'search' | 'notes' | 'settings' | null;
+type AnnotationFilter = 'all' | Annotation['type'];
 
 const themeValues: Record<ReaderPreferences['theme'], { bg: string; text: string; muted: string }> = {
   mist: { bg: '#E8EBF2', text: '#263846', muted: '#667381' },
@@ -60,6 +61,13 @@ const readingModeLabels: Record<ReaderPreferences['readingMode'], string> = {
   page: '横向翻页',
 };
 
+const annotationFilters: { value: AnnotationFilter; label: string }[] = [
+  { value: 'all', label: '全部' },
+  { value: 'bookmark', label: '书签' },
+  { value: 'highlight', label: '划线' },
+  { value: 'note', label: '笔记' },
+];
+
 function chapterLabel(title: string) {
   return cleanChapterTitle(title, '正文')
     .replace(/^Part\s+(\d+)$/i, '第 $1 部分')
@@ -77,6 +85,37 @@ function cleanInlineContent(input: string) {
     .replace(/\\?[\w-]*pq[\w.-]*\.(?:bmp|png|jpe?g|gif)\\?/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function parseAnnotationPosition(position: string) {
+  try {
+    const parsed = JSON.parse(position) as { chapterId?: string; offset?: number; quote?: string };
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function ratioFromOffset(chapter: Chapter | undefined, offset?: number) {
+  if (!chapter || typeof offset !== 'number' || offset < 0) {
+    return 0;
+  }
+
+  const contentLength = Math.max(1, chapter.textContent.length);
+  return Math.max(0, Math.min(0.96, offset / contentLength));
+}
+
+function formatAnnotationTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${month}/${day} ${hour}:${minute}`;
 }
 
 function renderTextBlock(block: string) {
@@ -429,6 +468,7 @@ export default function ReaderScreen() {
   });
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [panel, setPanel] = useState<Panel>(null);
+  const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>('all');
   const [chromeVisible, setChromeVisible] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -456,6 +496,26 @@ export default function ReaderScreen() {
     () => annotations.find((annotation) => annotation.type === 'bookmark' && annotation.chapterId === currentChapter?.id),
     [annotations, currentChapter?.id]
   );
+  const chapterTitleById = useMemo(() => {
+    return new Map(chapters.map((chapter) => [chapter.id, chapter.title]));
+  }, [chapters]);
+  const filteredAnnotations = useMemo(() => {
+    if (annotationFilter === 'all') {
+      return annotations;
+    }
+
+    return annotations.filter((annotation) => annotation.type === annotationFilter);
+  }, [annotationFilter, annotations]);
+  const annotationCounts = useMemo(() => {
+    return annotations.reduce(
+      (counts, annotation) => {
+        counts.all += 1;
+        counts[annotation.type] += 1;
+        return counts;
+      },
+      { all: 0, bookmark: 0, highlight: 0, note: 0 } as Record<AnnotationFilter, number>
+    );
+  }, [annotations]);
 
   const closePanel = useCallback(() => {
     Keyboard.dismiss();
@@ -567,6 +627,35 @@ export default function ReaderScreen() {
       saveProgress(db, book.id, chapters[index].id, ratio);
     },
     [book, chapters, db]
+  );
+
+  const goToSearchResult = useCallback(
+    (result: SearchResult) => {
+      const chapterIndex = chapters.findIndex((chapter) => chapter.id === result.chapterId);
+      if (chapterIndex < 0) {
+        showNotice('没有找到匹配章节');
+        return;
+      }
+
+      goToChapter(chapterIndex, ratioFromOffset(chapters[chapterIndex], result.matchOffset));
+      showNotice('已跳到命中位置');
+    },
+    [chapters, goToChapter, showNotice]
+  );
+
+  const goToAnnotation = useCallback(
+    (annotation: Annotation) => {
+      const chapterIndex = chapters.findIndex((chapter) => chapter.id === annotation.chapterId);
+      if (chapterIndex < 0) {
+        showNotice('没有找到标注所在章节');
+        return;
+      }
+
+      const position = parseAnnotationPosition(annotation.position);
+      goToChapter(chapterIndex, ratioFromOffset(chapters[chapterIndex], position.offset));
+      showNotice(`已跳到${annotationLabels[annotation.type]}`);
+    },
+    [chapters, goToChapter, showNotice]
   );
 
   const handleWebMessage = useCallback(
@@ -764,57 +853,66 @@ export default function ReaderScreen() {
           exiting={SlideOutDown.duration(150)}
           style={styles.bottomChrome}>
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
-            <View style={styles.chapterControls}>
-              <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-                tintColor={chromeTheme.text}
-                icon="chevron.left"
-                label="上一章"
+            <View style={[styles.chapterStrip, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+              <Pressable
                 disabled={currentIndex === 0}
                 onPress={() => goToChapter(Math.max(0, currentIndex - 1), preferences.readingMode === 'page' ? 1 : 0)}
-              />
-              <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-                tintColor={chromeTheme.text}
-                icon="chevron.right"
-                label="下一章"
+                style={({ pressed }) => [styles.chapterTextButton, currentIndex === 0 && styles.disabledChapterButton, pressed && styles.pressed]}>
+                <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>上一章</Text>
+              </Pressable>
+              <Pressable onPress={() => setPanel(panel === 'toc' ? null : 'toc')} style={({ pressed }) => [styles.chapterCenter, pressed && styles.pressed]}>
+                <Text numberOfLines={1} style={[styles.chapterCenterTitle, { color: chromeTheme.text }]}>
+                  {chapterLabel(currentChapter.title)}
+                </Text>
+                <Text style={[styles.chapterCenterMeta, { color: chromeTheme.muted }]}>
+                  {currentIndex + 1}/{chapters.length}
+                  {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
+                </Text>
+              </Pressable>
+              <Pressable
                 disabled={currentIndex >= chapters.length - 1}
                 onPress={() => goToChapter(Math.min(chapters.length - 1, currentIndex + 1), 0)}
-              />
+                style={({ pressed }) => [styles.chapterTextButton, currentIndex >= chapters.length - 1 && styles.disabledChapterButton, pressed && styles.pressed]}>
+                <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>下一章</Text>
+              </Pressable>
             </View>
             <View style={styles.toolRow}>
               <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-                tintColor={chromeTheme.text}
+                style={[
+                  styles.dockButton,
+                  { backgroundColor: panel === 'toc' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
+                ]}
+                tintColor={panel === 'toc' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
                 icon="list.bullet"
                 label="目录"
                 onPress={() => setPanel(panel === 'toc' ? null : 'toc')}
               />
               <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-                tintColor={chromeTheme.text}
+                style={[
+                  styles.dockButton,
+                  { backgroundColor: panel === 'search' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
+                ]}
+                tintColor={panel === 'search' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
                 icon="magnifyingglass"
                 label="搜索"
                 onPress={() => setPanel(panel === 'search' ? null : 'search')}
               />
               <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }, currentBookmark && styles.activeDockButton]}
-                tintColor={currentBookmark ? brand.colors.white : chromeTheme.text}
-                tone={currentBookmark ? 'filled' : 'dark'}
-                icon="bookmark"
-                label={currentBookmark ? '已书签' : '书签'}
-                onPress={addBookmark}
+                style={[
+                  styles.dockButton,
+                  { backgroundColor: panel === 'notes' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
+                ]}
+                tintColor={panel === 'notes' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
+                icon="note"
+                label="标注"
+                onPress={() => setPanel(panel === 'notes' ? null : 'notes')}
               />
               <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-                tintColor={chromeTheme.text}
-                icon="highlighter"
-                label="划线"
-                onPress={() => webViewRef.current?.injectJavaScript('window.__INBOX_CAPTURE_SELECTION && window.__INBOX_CAPTURE_SELECTION(); true;')}
-              />
-              <IconButton
-                style={[styles.dockButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-                tintColor={chromeTheme.text}
+                style={[
+                  styles.dockButton,
+                  { backgroundColor: panel === 'settings' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
+                ]}
+                tintColor={panel === 'settings' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
                 icon="textformat.size"
                 label="样式"
                 onPress={() => setPanel(panel === 'settings' ? null : 'settings')}
@@ -888,21 +986,45 @@ export default function ReaderScreen() {
                   {searchResults.map((result) => (
                     <Pressable
                       key={`${result.chapterId}-${result.matchOffset}`}
-                      onPress={() => {
-                        goToChapter(chapters.findIndex((chapter) => chapter.id === result.chapterId));
-                        showNotice('已跳到匹配章节');
-                      }}
-                      style={styles.panelRow}>
-                      <Text style={styles.panelRowTitle}>{chapterLabel(result.chapterTitle)}</Text>
+                      onPress={() => goToSearchResult(result)}
+                      style={[styles.panelRow, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                      <Text style={[styles.panelRowTitle, { color: chromeTheme.text }]}>{chapterLabel(result.chapterTitle)}</Text>
                       <SearchExcerpt text={result.excerpt} query={searchQuery} />
                     </Pressable>
                   ))}
+                  {searchQuery.trim() && searchResults.length === 0 && (
+                    <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                      <Text style={[styles.emptyPanelTitle, { color: chromeTheme.text }]}>没有搜索结果</Text>
+                      <Text style={[styles.emptyPanelBody, { color: chromeTheme.muted }]}>换一个关键词试试。</Text>
+                    </View>
+                  )}
                 </ScrollView>
               </View>
             )}
 
             {panel === 'notes' && (
               <View style={styles.panelBody}>
+                <View style={styles.annotationQuickActions}>
+                  <Pressable
+                    onPress={addBookmark}
+                    style={[
+                      styles.annotationActionCard,
+                      { backgroundColor: currentBookmark ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
+                    ]}>
+                    <Text style={[styles.annotationActionTitle, { color: currentBookmark ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text }]}>
+                      {currentBookmark ? '取消书签' : '本章书签'}
+                    </Text>
+                    <Text style={[styles.annotationActionBody, { color: currentBookmark ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.muted }]}>
+                      {currentBookmark ? '已标记当前章' : '收藏当前位置'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => webViewRef.current?.injectJavaScript('window.__INBOX_CAPTURE_SELECTION && window.__INBOX_CAPTURE_SELECTION(); true;')}
+                    style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                    <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>划线</Text>
+                    <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>先选中文字</Text>
+                  </Pressable>
+                </View>
                 <TextInput
                   value={noteDraft}
                   onChangeText={setNoteDraft}
@@ -914,22 +1036,58 @@ export default function ReaderScreen() {
                 <Pressable onPress={saveNote} style={({ pressed }) => [styles.saveNoteButton, pressed && styles.pressed]}>
                   <Text style={styles.saveNoteText}>保存笔记</Text>
                 </Pressable>
+                <View style={styles.filterRow}>
+                  {annotationFilters.map((filter) => {
+                    const active = annotationFilter === filter.value;
+                    return (
+                      <Pressable
+                        key={filter.value}
+                        onPress={() => setAnnotationFilter(filter.value)}
+                        style={[
+                          styles.filterChip,
+                          { backgroundColor: active ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
+                        ]}>
+                        <Text style={[styles.filterChipText, { color: active ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text }]}>
+                          {filter.label} {annotationCounts[filter.value]}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
                 <ScrollView contentContainerStyle={styles.panelList}>
-                  {annotations.map((annotation) => (
-                    <View key={annotation.id} style={styles.panelRow}>
-                      <Text style={styles.annotationType}>{annotationLabels[annotation.type]}</Text>
-                      <Text numberOfLines={4} style={styles.panelRowTitle}>
+                  {filteredAnnotations.map((annotation) => (
+                    <Pressable
+                      key={annotation.id}
+                      onPress={() => goToAnnotation(annotation)}
+                      style={[styles.panelRow, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                      <View style={styles.annotationHeader}>
+                        <Text style={[styles.annotationType, { color: chromeTheme.accent }]}>{annotationLabels[annotation.type]}</Text>
+                        <Text numberOfLines={1} style={[styles.annotationChapter, { color: chromeTheme.muted }]}>
+                          {chapterLabel(chapterTitleById.get(annotation.chapterId) ?? '正文')} · {formatAnnotationTime(annotation.updatedAt)}
+                        </Text>
+                      </View>
+                      <Text numberOfLines={4} style={[styles.panelRowTitle, { color: chromeTheme.text }]}>
                         {annotation.noteText || annotation.selectedText || '章节书签'}
                       </Text>
-                      <Pressable
-                        onPress={async () => {
-                          await deleteAnnotation(db, annotation.id);
-                          setAnnotations(await listAnnotations(db, book.id));
-                        }}>
-                        <Text style={styles.deleteText}>删除</Text>
-                      </Pressable>
-                    </View>
+                      <View style={styles.annotationActions}>
+                        <Text style={[styles.annotationHint, { color: chromeTheme.muted }]}>点按跳转</Text>
+                        <Pressable
+                          hitSlop={8}
+                          onPress={async () => {
+                            await deleteAnnotation(db, annotation.id);
+                            setAnnotations(await listAnnotations(db, book.id));
+                          }}>
+                          <Text style={[styles.deleteText, { color: chromeTheme.accent }]}>删除</Text>
+                        </Pressable>
+                      </View>
+                    </Pressable>
                   ))}
+                  {filteredAnnotations.length === 0 && (
+                    <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                      <Text style={[styles.emptyPanelTitle, { color: chromeTheme.text }]}>还没有{annotationFilter === 'all' ? '标注' : annotationLabels[annotationFilter]}</Text>
+                      <Text style={[styles.emptyPanelBody, { color: chromeTheme.muted }]}>可以在正文里添加书签、划线或笔记，之后从这里快速找回。</Text>
+                    </View>
+                  )}
                 </ScrollView>
               </View>
             )}
@@ -1100,6 +1258,51 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  chapterStrip: {
+    minHeight: 48,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+  },
+  chapterTextButton: {
+    minWidth: 64,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+  },
+  disabledChapterButton: {
+    opacity: 0.36,
+  },
+  chapterTextButtonText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  chapterCenter: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  chapterCenterTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  chapterCenterMeta: {
+    fontSize: 11,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0,
+  },
   toolRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
@@ -1114,10 +1317,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     backgroundColor: 'rgba(48, 67, 82, 0.065)',
     borderColor: 'rgba(48, 67, 82, 0.10)',
-  },
-  activeDockButton: {
-    backgroundColor: brand.colors.ink,
-    borderColor: brand.colors.ink,
   },
   panel: {
     position: 'absolute',
@@ -1183,6 +1382,25 @@ const styles = StyleSheet.create({
   panelList: {
     gap: 10,
     paddingBottom: 12,
+  },
+  emptyPanelState: {
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    padding: 16,
+    gap: 5,
+  },
+  emptyPanelTitle: {
+    color: brand.colors.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  emptyPanelBody: {
+    color: brand.colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   panelRow: {
     borderRadius: brand.radius.medium,
@@ -1268,11 +1486,81 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0,
   },
+  annotationQuickActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  annotationActionCard: {
+    flex: 1,
+    minHeight: 68,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    justifyContent: 'center',
+    gap: 4,
+  },
+  annotationActionTitle: {
+    color: brand.colors.ink,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  annotationActionBody: {
+    color: brand.colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    minHeight: 34,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  filterChipText: {
+    color: brand.colors.ink,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  annotationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   annotationType: {
     color: brand.colors.copper,
     fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0,
+  },
+  annotationChapter: {
+    color: brand.colors.muted,
+    flex: 1,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  annotationActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  annotationHint: {
+    color: brand.colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
   },
   deleteText: {
     color: brand.colors.island,
