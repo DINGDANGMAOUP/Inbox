@@ -82,6 +82,18 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean --no-install --non-interactive
 
+      - name: Tune Gradle for CI
+        run: |
+          cat >> android/gradle.properties <<'EOF'
+
+          # GitHub hosted runners are memory constrained during React Native release dexing.
+          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+          org.gradle.parallel=false
+          org.gradle.caching=true
+          org.gradle.workers.max=2
+          kotlin.daemon.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m
+          EOF
+
       - name: Restore signing key
         run: |
           mkdir -p android/app/signing
@@ -93,7 +105,7 @@ jobs:
         run: |
           cd android
           chmod +x ./gradlew
-          ./gradlew --no-daemon --console=plain --stacktrace --info assembleRelease \
+          ./gradlew --no-daemon --console=plain --stacktrace --max-workers=2 assembleRelease \
             -Pandroid.injected.signing.store.file="$GITHUB_WORKSPACE/android/app/signing/release.keystore" \
             -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
@@ -102,6 +114,17 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload Android failure reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-failure-reports
+          if-no-files-found: ignore
+          path: |
+            android/app/build/reports/
+            android/app/build/outputs/logs/
+            android/build/reports/
 
       - name: Prepare release assets
         run: |
