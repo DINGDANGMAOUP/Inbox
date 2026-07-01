@@ -5,7 +5,6 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -17,13 +16,25 @@ import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-re
 
 import { BookCover } from '@/components/reader/book-cover';
 import { IconButton } from '@/components/reader/icon-button';
+import { M3FilterChip, M3Screen, M3StatePanel } from '@/components/reader/m3';
+import { M3Pressable } from '@/components/reader/m3-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
-import { themeAssets } from '@/constants/theme-assets';
+import { motion } from '@/constants/motion';
+import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
 import { cleanChapterTitle } from '@/lib/text-utils';
 import { deleteBook, importBook, listBooks } from '@/lib/reader-service';
-import type { LibraryBook, ReaderTheme } from '@/types/reader';
+import type { LibraryBook, ResolvedAppTheme } from '@/types/reader';
+
+type LibraryFilter = 'all' | 'reading' | 'unread';
+
+const libraryFilters: { value: LibraryFilter; label: string; icon: MaterialSymbolName }[] = [
+  { value: 'all', label: '全部', icon: 'bookmark' },
+  { value: 'reading', label: '在读', icon: 'textformat.size' },
+  { value: 'unread', label: '未开始', icon: 'tray.and.arrow.down' },
+];
 
 function authorLabel(author: string) {
   return author === 'Local file' ? '本地文件' : author;
@@ -77,6 +88,17 @@ function BrandSeal() {
   );
 }
 
+function MetricPill({ value, label, tone }: { value: string | number; label: string; tone: 'warm' | 'cool' | 'quiet' }) {
+  const toneStyle =
+    tone === 'warm' ? styles.warmMetricPill : tone === 'cool' ? styles.coolMetricPill : styles.quietMetricPill;
+  return (
+    <View style={[styles.metricPill, toneStyle]}>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
 function BookTile({
   book,
   index,
@@ -85,25 +107,25 @@ function BookTile({
 }: {
   book: LibraryBook;
   index: number;
-  theme: ReaderTheme;
+  theme: ResolvedAppTheme;
   onDelete: (book: LibraryBook) => void;
 }) {
   const fillPercent = bookProgressPercent(book) ?? 0;
-  const themeToken = brand.themes[theme];
+  const themeToken = brand.appThemes[theme];
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(index * 20).duration(180)}
-      exiting={FadeOut.duration(120)}
-      layout={LinearTransition.duration(160)}
+      entering={FadeInDown.delay(index * motion.stagger.listItem).duration(motion.duration.medium)}
+      exiting={FadeOut.duration(motion.duration.short)}
+      layout={LinearTransition.duration(motion.duration.medium)}
       style={styles.tile}>
-      <Pressable
+      <M3Pressable
         onPress={() => router.push({ pathname: '/reader/[id]', params: { id: book.id } })}
         onLongPress={() => onDelete(book)}
-        style={({ pressed }) => [
+        feedback="subtle"
+        style={[
           styles.tilePressable,
           { backgroundColor: themeToken.surfaceSolid, borderColor: themeToken.line },
-          pressed && styles.pressed,
         ]}>
         <BookCover book={book} size="small" theme={theme} />
         <View style={styles.tileCopy}>
@@ -122,46 +144,52 @@ function BookTile({
             <Text numberOfLines={1} style={[styles.progressText, { color: themeToken.muted }]}>
               {progressLabel(book)}
             </Text>
-            <Text style={[styles.tileStatus, { color: themeToken.accent }]}>{statusLabel(book)}</Text>
+            <View style={[styles.tileAction, { backgroundColor: themeToken.text }]}>
+              <Text style={[styles.tileStatus, { color: themeToken.surfaceSolid }]}>{statusLabel(book)}</Text>
+            </View>
           </View>
           <View style={[styles.progressTrack, { backgroundColor: themeToken.line }]}>
             <View style={[styles.progressFill, { width: `${fillPercent}%`, backgroundColor: themeToken.accent }]} />
           </View>
         </View>
-      </Pressable>
+      </M3Pressable>
     </Animated.View>
   );
 }
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
-  const { preferences } = useReaderPreferences();
+  const { resolvedAppTheme } = useReaderPreferences();
   const [books, setBooks] = useState<LibraryBook[]>([]);
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<LibraryFilter>('all');
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const activeTheme = preferences.theme;
-  const theme = brand.themes[activeTheme];
+  const activeTheme = resolvedAppTheme;
+  const theme = brand.appThemes[activeTheme];
   const isDeepTheme = activeTheme === 'deep';
   const ambientTextColor = isDeepTheme ? brand.colors.white : theme.text;
   const ambientMutedColor = isDeepTheme ? 'rgba(255, 255, 255, 0.76)' : theme.muted;
 
   const filteredBooks = useMemo(() => {
     const trimmed = query.trim().toLowerCase();
-    if (!trimmed) {
-      return books;
-    }
-    return books.filter((book) => `${bookTitleLabel(book)} ${book.author}`.toLowerCase().includes(trimmed));
-  }, [books, query]);
+    return books.filter((book) => {
+      const matchesQuery = !trimmed || `${bookTitleLabel(book)} ${book.author}`.toLowerCase().includes(trimmed);
+      const matchesFilter = filter === 'all' || (filter === 'reading' ? hasReadingProgress(book) : !hasReadingProgress(book));
+      return matchesQuery && matchesFilter;
+    });
+  }, [books, filter, query]);
 
   const featuredBook = query.trim() ? null : books.find(hasReadingProgress) ?? books[0];
   const featuredStarted = featuredBook ? hasReadingProgress(featuredBook) : false;
   const featuredProgressPercent = featuredBook ? bookProgressPercent(featuredBook) : null;
+  const shelfPreview = query.trim() ? filteredBooks.slice(0, 6) : books.slice(0, 6);
 
   const startedCount = useMemo(() => {
     return books.filter(hasReadingProgress).length;
   }, [books]);
+  const unreadCount = Math.max(0, books.length - startedCount);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -213,67 +241,111 @@ export default function LibraryScreen() {
   );
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
-      <Image
-        key={`library-background-${activeTheme}`}
-        source={themeAssets[activeTheme].background}
-        contentFit="cover"
-        transition={180}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]} />
+    <M3Screen
+      key={`library-screen-${activeTheme}`}
+      theme={theme}
+      backgroundSource={appThemeAssets[activeTheme].background}
+      overlayColor={isDeepTheme ? 'rgba(5, 6, 8, 0.58)' : 'rgba(248, 245, 238, 0.76)'}>
       <ScrollView
         style={styles.scroller}
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={loading && books.length > 0} onRefresh={refresh} />}
         contentContainerStyle={styles.content}>
-      <View style={styles.masthead}>
-        <View style={styles.hero}>
+        <View style={styles.topAppBar}>
           <View style={styles.brandRow}>
             <BrandSeal />
             <View style={styles.heroText}>
-              <Text style={[styles.eyebrow, { color: ambientMutedColor }]}>INBOX · 私人离线书库</Text>
-              <Text style={[styles.title, { color: ambientTextColor }]}>墨屿</Text>
+              <Image source={isDeepTheme ? brandAssets.wordmarkLight : brandAssets.wordmark} contentFit="contain" transition={160} style={styles.wordmark} />
             </View>
           </View>
-          <View style={styles.actionColumn}>
-            <IconButton tone="filled" icon="plus" label={importing ? '导入中' : '导入'} disabled={importing} onPress={handleImport} />
-            <View style={styles.utilityRow}>
-              <IconButton tone="quiet" icon="settings" label="设置" onPress={() => router.push('/settings')} />
-              <IconButton tone="quiet" icon="info" label="关于" onPress={() => router.push('/about')} />
-            </View>
+          <View style={styles.utilityRow}>
+            <IconButton
+              tone="quiet"
+              icon="settings"
+              label="设置"
+              tintColor={ambientTextColor}
+              size="icon"
+              style={[styles.appBarIconButton, { backgroundColor: isDeepTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(22, 22, 18, 0.08)', borderColor: theme.line }]}
+              onPress={() => router.push('/settings')}
+            />
+            <IconButton
+              tone="quiet"
+              icon="info"
+              label="关于"
+              tintColor={ambientTextColor}
+              size="icon"
+              style={[styles.appBarIconButton, { backgroundColor: isDeepTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(22, 22, 18, 0.08)', borderColor: theme.line }]}
+              onPress={() => router.push('/about')}
+            />
           </View>
         </View>
-        <Text style={[styles.tagline, { color: ambientMutedColor }]}>把 EPUB 与 TXT 收进本机，一座只属于你的安静书岛。</Text>
-        <View style={[styles.metricRow, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-          <View style={styles.metric}>
-            <Text style={[styles.metricValue, { color: theme.text }]}>{books.length}</Text>
-            <Text style={[styles.metricLabel, { color: theme.muted }]}>本机藏书</Text>
-          </View>
-          <View style={[styles.metricDivider, { backgroundColor: theme.line }]} />
-          <View style={styles.metric}>
-            <Text style={[styles.metricValue, { color: theme.text }]}>{startedCount}</Text>
-            <Text style={[styles.metricLabel, { color: theme.muted }]}>已开始</Text>
-          </View>
-          <View style={[styles.metricDivider, { backgroundColor: theme.line }]} />
-          <View style={styles.metric}>
-            <Text style={[styles.metricValue, { color: theme.text }]}>离线</Text>
-            <Text style={[styles.metricLabel, { color: theme.muted }]}>阅读模式</Text>
-          </View>
-        </View>
-      </View>
 
-      <TextInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder="搜索书架"
-        placeholderTextColor={theme.muted}
-        autoCapitalize="none"
-        style={[styles.search, { backgroundColor: theme.surfaceSolid, borderColor: theme.line, color: theme.text }]}
-      />
+        <View style={styles.libraryHero}>
+          <View style={styles.libraryHeroTop}>
+            <View style={styles.heroCopyBlock}>
+              <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
+              <Text style={styles.heroTitle}>安静地读{'\n'}利落地收</Text>
+            </View>
+            <View style={styles.metricGrid}>
+              <MetricPill value={books.length} label="藏书" tone="warm" />
+              <MetricPill value={startedCount} label="在读" tone="cool" />
+              <MetricPill value={unreadCount} label="未开" tone="quiet" />
+            </View>
+          </View>
+          <View style={styles.commandRow}>
+            <View style={styles.searchBar}>
+              <MaterialSymbol name="magnifyingglass" color="rgba(245, 239, 228, 0.62)" description="搜索书架" size={18} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="搜索书名或作者"
+                placeholderTextColor="rgba(245, 239, 228, 0.48)"
+                autoCapitalize="none"
+                style={styles.searchInput}
+              />
+            </View>
+            <IconButton
+              tone="filled"
+              icon="plus"
+              label={importing ? '导入中' : '导入'}
+              size="icon"
+              disabled={importing}
+              tintColor="#161711"
+              onPress={handleImport}
+              style={styles.heroImportButton}
+            />
+          </View>
+          <View style={styles.metricGrid}>
+            {libraryFilters.map((item) => {
+              const active = filter === item.value;
+              const count = item.value === 'all' ? books.length : item.value === 'reading' ? startedCount : unreadCount;
+              return (
+                <M3FilterChip
+                  key={item.value}
+                  theme={{
+                    ...theme,
+                    surface: 'rgba(255, 255, 255, 0.10)',
+                    surfaceContainer: 'rgba(255, 255, 255, 0.10)',
+                    primaryContainer: '#E7D9B7',
+                    onPrimaryContainer: '#1B1710',
+                    text: '#F8F1E6',
+                    muted: 'rgba(248, 241, 230, 0.62)',
+                    accent: '#E7D9B7',
+                    line: 'rgba(255, 255, 255, 0.14)',
+                  }}
+                  selected={active}
+                  label={item.label}
+                  count={count}
+                  icon={item.icon}
+                  onPress={() => setFilter(item.value)}
+                />
+              );
+            })}
+          </View>
+        </View>
 
       {notice && (
-        <Animated.View entering={FadeInDown.duration(180)} exiting={FadeOut.duration(120)} style={styles.notice}>
+        <Animated.View entering={FadeInDown.duration(motion.duration.medium)} exiting={FadeOut.duration(motion.duration.short)} style={styles.notice}>
           <Text numberOfLines={2} style={styles.noticeText}>
             {notice}
           </Text>
@@ -282,72 +354,111 @@ export default function LibraryScreen() {
 
       {!!query.trim() && (
         <Animated.View
-          entering={FadeInDown.duration(160)}
-          exiting={FadeOut.duration(120)}
+          entering={FadeInDown.duration(motion.duration.short)}
+          exiting={FadeOut.duration(motion.duration.short)}
           style={[styles.searchContext, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           <Text style={[styles.searchContextText, { color: theme.accent }]}>正在筛选书架</Text>
-          <Pressable onPress={() => setQuery('')} hitSlop={8} style={({ pressed }) => pressed && styles.pressed}>
+          <M3Pressable onPress={() => setQuery('')} hitSlop={8} feedback="subtle">
             <Text style={[styles.clearSearchText, { color: theme.text }]}>清除</Text>
-          </Pressable>
+          </M3Pressable>
         </Animated.View>
       )}
 
       {featuredBook && (
-        <Animated.View entering={FadeInDown.duration(180)}>
-          <Pressable
+        <Animated.View entering={FadeInDown.duration(motion.duration.medium)}>
+          <M3Pressable
             onPress={() => router.push({ pathname: '/reader/[id]', params: { id: featuredBook.id } })}
-            style={({ pressed }) => [
+            feedback="subtle"
+            style={[
               styles.featured,
               { backgroundColor: theme.surfaceSolid, borderColor: theme.line },
-              pressed && styles.pressed,
             ]}>
             <View style={styles.featuredCoverColumn}>
               <BookCover book={featuredBook} size="hero" theme={activeTheme} />
             </View>
-            <View style={[styles.featuredDivider, { backgroundColor: theme.line }]} />
             <View style={styles.featuredCopy}>
-              <Text style={[styles.sectionKicker, { color: theme.accent }]}>{featuredStarted ? '继续阅读' : '最近导入'}</Text>
+              <View style={styles.featuredHeaderRow}>
+                <Text style={styles.sectionKicker}>{featuredStarted ? 'CONTINUE' : 'LATEST'}</Text>
+                <View style={[styles.featuredStatusChip, { backgroundColor: theme.text }]}>
+                  <Text style={[styles.featuredStatusText, { color: theme.surfaceSolid }]}>{statusLabel(featuredBook)}</Text>
+                </View>
+              </View>
               <Text numberOfLines={2} style={[styles.featuredTitle, { color: theme.text }]}>
                 {bookTitleLabel(featuredBook)}
               </Text>
               <Text numberOfLines={1} style={[styles.featuredMeta, { color: theme.muted }]}>
                 {progressLabel(featuredBook)}
               </Text>
-              {featuredStarted && featuredProgressPercent !== null && featuredProgressPercent > 0 && (
-                <View style={[styles.featuredProgressTrack, { backgroundColor: theme.line }]}>
-                  <View style={[styles.featuredProgressFill, { width: `${featuredProgressPercent}%`, backgroundColor: theme.accent }]} />
+              <View style={styles.featuredFooter}>
+                <View style={styles.featuredProgressGroup}>
+                  <View style={[styles.featuredProgressTrack, { backgroundColor: theme.surfaceVariant }]}>
+                    <View style={[styles.featuredProgressFill, { width: `${featuredProgressPercent ?? 0}%` }]} />
+                  </View>
+                  <Text style={[styles.featuredProgressLabel, { color: theme.muted }]}>
+                    {featuredProgressPercent === null ? '尚未开始' : `${featuredProgressPercent}% 已读`}
+                  </Text>
                 </View>
-              )}
-              <View style={[styles.readButton, { backgroundColor: theme.accent }]}>
-                <Text style={styles.readButtonText}>打开阅读器</Text>
+                <View style={styles.readButton}>
+                  <Text style={styles.readButtonText}>阅读</Text>
+                  <MaterialSymbol name="chevron.right" color="#F7F0E4" description="开始阅读" size={17} />
+                </View>
               </View>
             </View>
-          </Pressable>
+          </M3Pressable>
         </Animated.View>
+      )}
+
+      {shelfPreview.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.coverRail}>
+          {shelfPreview.map((book, index) => (
+            <Animated.View key={`cover-${book.id}`} entering={FadeInDown.delay(index * 36).duration(motion.duration.medium)}>
+              <M3Pressable
+                onPress={() => router.push({ pathname: '/reader/[id]', params: { id: book.id } })}
+                onLongPress={() => handleDelete(book)}
+                feedback="subtle"
+                style={styles.coverRailItem}>
+                <BookCover book={book} size="small" theme={activeTheme} />
+              </M3Pressable>
+            </Animated.View>
+          ))}
+        </ScrollView>
       )}
 
       <View style={styles.sectionHeader}>
         <View>
-          <Text style={[styles.sectionKickerDark, { color: isDeepTheme ? 'rgba(255, 255, 255, 0.68)' : theme.accent }]}>LIBRARY</Text>
-          <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>书架</Text>
+          <Text style={styles.sectionKickerDark}>SHELF</Text>
+          <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>{filter === 'reading' ? '继续阅读' : filter === 'unread' ? '未开始' : '全部书籍'}</Text>
         </View>
         <Text style={[styles.count, { color: ambientMutedColor }]}>{filteredBooks.length} 本书</Text>
       </View>
 
       {loading && books.length === 0 ? (
-        <View style={[styles.emptyState, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-          <ActivityIndicator color={theme.accent} />
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>正在整理书架</Text>
-        </View>
+        <M3StatePanel theme={theme} title="正在整理书架" artwork={<ActivityIndicator color={theme.accent} />} />
       ) : filteredBooks.length === 0 ? (
-        <Animated.View entering={FadeInDown.duration(260)} style={[styles.emptyState, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-          <BrandSeal />
-          <Text style={[styles.emptyTitle, { color: theme.text }]}>{query ? '没有匹配的书' : '导入第一本书'}</Text>
-          <Text style={[styles.emptyBody, { color: theme.muted }]}>
-            EPUB 和 TXT 文件只保存在这台设备上。阅读进度、搜索索引、划线和笔记都会离线保存。
-          </Text>
-          <IconButton icon="tray.and.arrow.down" label={importing ? '导入中' : '选择文件'} disabled={importing} onPress={handleImport} />
-        </Animated.View>
+        <M3StatePanel
+          theme={theme}
+          title={query ? '没有匹配的书' : '导入第一本书'}
+          body="支持 EPUB 与 TXT。"
+          artwork={<BrandSeal />}
+          order={1}>
+          {!query.trim() && (
+            <View style={styles.emptyCapabilityRow}>
+              <EmptyCapability theme={activeTheme} label="EPUB" />
+              <EmptyCapability theme={activeTheme} label="TXT" />
+            </View>
+          )}
+          <IconButton
+            icon="tray.and.arrow.down"
+            label={importing ? '导入中' : '选择文件'}
+            tintColor={theme.onPrimaryContainer}
+            style={{ backgroundColor: theme.primaryContainer, borderColor: theme.line }}
+            disabled={importing}
+            onPress={handleImport}
+          />
+        </M3StatePanel>
       ) : (
         <View style={styles.shelfList}>
           {filteredBooks.map((book, index) => (
@@ -356,34 +467,36 @@ export default function LibraryScreen() {
         </View>
       )}
       </ScrollView>
+    </M3Screen>
+  );
+}
+
+function EmptyCapability({ theme, label }: { theme: ResolvedAppTheme; label: string }) {
+  const token = brand.appThemes[theme];
+  return (
+    <View style={[styles.emptyCapability, { backgroundColor: token.surface, borderColor: token.line }]}>
+      <Text style={[styles.emptyCapabilityText, { color: token.accent }]}>{label}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: brand.colors.paper,
-  },
   scroller: {
     flex: 1,
     backgroundColor: 'transparent',
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 58,
-    paddingBottom: 48,
+    paddingHorizontal: 18,
+    paddingTop: 42,
+    paddingBottom: 118,
     gap: 18,
   },
-  masthead: {
-    gap: 18,
-    paddingBottom: 4,
-  },
-  hero: {
+  topAppBar: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
     gap: 14,
+    minHeight: 54,
   },
   brandRow: {
     flex: 1,
@@ -393,13 +506,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   brandSeal: {
-    width: 58,
-    height: 58,
+    width: 46,
+    height: 46,
     borderRadius: 15,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: brand.colors.paperElevated,
-    boxShadow: '0 10px 24px rgba(48, 67, 82, 0.20)',
+    backgroundColor: '#F3E9D2',
+    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.20)',
   },
   brandSealImage: {
     width: '100%',
@@ -411,85 +524,132 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   eyebrow: {
-    color: brand.colors.island,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  title: {
-    color: brand.colors.ink,
-    fontSize: 48,
-    lineHeight: 54,
+    color: '#D8C59A',
+    fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
-  tagline: {
-    color: brand.colors.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    maxWidth: 330,
-    fontWeight: '600',
-  },
-  actionColumn: {
-    alignItems: 'flex-end',
-    gap: 8,
+  wordmark: {
+    width: 132,
+    height: 46,
+    marginLeft: -4,
   },
   utilityRow: {
     flexDirection: 'row',
-    gap: 7,
+    gap: 8,
   },
-  metricRow: {
-    flexDirection: 'row',
-    minHeight: 74,
-    borderRadius: brand.radius.medium,
+  appBarIconButton: {
+    width: 44,
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 0,
+  },
+  libraryHero: {
+    borderRadius: 30,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(247, 248, 251, 0.74)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.62)',
-    alignItems: 'center',
-    paddingHorizontal: 16,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: '#151611',
+    padding: 18,
+    gap: 18,
+    overflow: 'hidden',
+    boxShadow: '0 24px 54px rgba(0, 0, 0, 0.28)',
   },
-  metric: {
-    flex: 1,
-    gap: 4,
+  libraryHeroTop: {
+    gap: 16,
   },
-  metricValue: {
-    color: brand.colors.ink,
-    fontSize: 20,
-    lineHeight: 24,
+  heroCopyBlock: {
+    gap: 8,
+  },
+  heroTitle: {
+    maxWidth: 260,
+    color: '#F7F0E4',
+    fontSize: 31,
+    lineHeight: 36,
     fontWeight: '900',
     letterSpacing: 0,
   },
+  metricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  metricPill: {
+    minWidth: 74,
+    minHeight: 58,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    justifyContent: 'center',
+    gap: 1,
+  },
+  warmMetricPill: {
+    backgroundColor: '#E7D9B7',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  coolMetricPill: {
+    backgroundColor: '#BFD6C3',
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  quietMetricPill: {
+    backgroundColor: '#F0ECE2',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  metricValue: {
+    color: '#14130F',
+    fontSize: 20,
+    lineHeight: 23,
+    fontWeight: '900',
+    letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
+  },
   metricLabel: {
-    color: brand.colors.muted,
+    color: 'rgba(20, 19, 15, 0.68)',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '900',
     letterSpacing: 0,
   },
-  metricDivider: {
-    width: 1,
-    alignSelf: 'stretch',
-    marginVertical: 18,
-    backgroundColor: brand.colors.line,
+  commandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
-  search: {
-    minHeight: 50,
-    borderRadius: brand.radius.medium,
+  searchBar: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 18,
     borderCurve: 'continuous',
-    paddingHorizontal: 16,
-    color: brand.colors.ink,
-    backgroundColor: brand.colors.paperElevated,
+    paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.72)',
-    fontSize: 16,
-    fontWeight: '600',
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.075)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  searchInput: {
+    flex: 1,
+    minHeight: 46,
+    color: '#F7F0E4',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  heroImportButton: {
+    width: 52,
+    minWidth: 52,
+    minHeight: 52,
+    paddingHorizontal: 0,
+    backgroundColor: '#E7D9B7',
+    borderColor: '#E7D9B7',
   },
   notice: {
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
-    backgroundColor: brand.colors.ink,
+    backgroundColor: brand.colors.inverseSurface,
     borderWidth: 1,
-    borderColor: brand.colors.islandDeep,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
@@ -501,8 +661,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   searchContext: {
-    minHeight: 42,
-    borderRadius: brand.radius.medium,
+    minHeight: 44,
+    borderRadius: 18,
     borderCurve: 'continuous',
     backgroundColor: 'rgba(221, 230, 237, 0.78)',
     borderWidth: 1,
@@ -528,49 +688,69 @@ const styles = StyleSheet.create({
   featured: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
-    borderRadius: brand.radius.medium,
+    gap: 16,
+    borderRadius: 26,
     borderCurve: 'continuous',
     overflow: 'hidden',
     minHeight: 198,
     borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 17,
-    boxShadow: brand.shadow.shelf,
+    padding: 12,
+    boxShadow: '0 18px 40px rgba(0, 0, 0, 0.16)',
   },
   featuredCoverColumn: {
-    width: 124,
+    width: 126,
+    alignSelf: 'stretch',
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  featuredDivider: {
-    width: 1,
-    alignSelf: 'stretch',
-    opacity: 0.8,
+    borderRadius: 22,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(10, 11, 9, 0.08)',
+    padding: 9,
+    overflow: 'hidden',
   },
   featuredCopy: {
     flex: 1,
     justifyContent: 'center',
-    gap: 11,
+    gap: 10,
     minWidth: 0,
+    paddingVertical: 4,
+  },
+  featuredHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  featuredStatusChip: {
+    minHeight: 28,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  featuredStatusText: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   sectionKicker: {
-    color: brand.colors.islandDeep,
-    fontSize: 12,
+    color: '#7A6B48',
+    fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
   sectionKickerDark: {
-    color: brand.colors.copper,
+    color: '#7A6B48',
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
   featuredTitle: {
     color: brand.colors.ink,
-    fontSize: 24,
-    lineHeight: 29,
+    fontSize: 23,
+    lineHeight: 28,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -579,8 +759,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  featuredFooter: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  featuredProgressGroup: {
+    flex: 1,
+    minWidth: 0,
+    gap: 7,
+  },
   featuredProgressTrack: {
-    height: 5,
+    height: 8,
     borderRadius: brand.radius.round,
     backgroundColor: brand.colors.paperSoft,
     overflow: 'hidden',
@@ -588,17 +778,25 @@ const styles = StyleSheet.create({
   featuredProgressFill: {
     height: '100%',
     borderRadius: brand.radius.round,
-    backgroundColor: brand.colors.island,
+    backgroundColor: '#BFD6C3',
   },
   readButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: brand.colors.ink,
+    backgroundColor: '#151611',
     borderRadius: brand.radius.round,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 18,
   },
   readButtonText: {
-    color: brand.colors.white,
+    color: '#F7F0E4',
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  featuredProgressLabel: {
+    fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -606,11 +804,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingTop: 2,
   },
   sectionTitle: {
     color: brand.colors.ink,
-    fontSize: 28,
-    lineHeight: 33,
+    fontSize: 26,
+    lineHeight: 31,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -620,21 +819,21 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   shelfList: {
-    gap: 12,
+    gap: 10,
   },
   tile: {
     width: '100%',
   },
   tilePressable: {
-    minHeight: 124,
-    borderRadius: brand.radius.medium,
+    minHeight: 118,
+    borderRadius: 22,
     borderCurve: 'continuous',
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    padding: 14,
-    boxShadow: '0 10px 24px rgba(48, 67, 82, 0.10)',
+    padding: 12,
+    boxShadow: '0 9px 20px rgba(0, 0, 0, 0.07)',
   },
   tileCopy: {
     flex: 1,
@@ -649,8 +848,8 @@ const styles = StyleSheet.create({
   tileTitle: {
     color: brand.colors.ink,
     flex: 1,
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -660,11 +859,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   formatPill: {
-    minWidth: 44,
+    minWidth: 42,
     borderRadius: brand.radius.round,
     borderWidth: 1,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     alignItems: 'center',
   },
   formatPillText: {
@@ -679,20 +878,28 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   tileStatus: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
+  },
+  tileAction: {
+    minHeight: 28,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressTrack: {
     height: 5,
     borderRadius: brand.radius.round,
-    backgroundColor: 'rgba(213, 222, 231, 0.9)',
+    backgroundColor: 'rgba(21, 22, 17, 0.12)',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     borderRadius: brand.radius.round,
-    backgroundColor: brand.colors.island,
+    backgroundColor: '#BFD6C3',
   },
   progressText: {
     color: brand.colors.muted,
@@ -700,32 +907,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
-  emptyState: {
-    minHeight: 260,
-    borderRadius: brand.radius.medium,
+  coverRail: {
+    gap: 12,
+    paddingRight: 18,
+  },
+  coverRailItem: {
+    width: 72,
+  },
+  emptyCapabilityRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  emptyCapability: {
+    minHeight: 32,
+    borderRadius: brand.radius.round,
     borderCurve: 'continuous',
-    backgroundColor: brand.colors.paperElevated,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.70)',
+    paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 26,
-    gap: 14,
   },
-  emptyTitle: {
-    color: brand.colors.ink,
-    fontSize: 20,
+  emptyCapabilityText: {
+    fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0,
-  },
-  emptyBody: {
-    color: brand.colors.muted,
-    textAlign: 'center',
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  pressed: {
-    opacity: 0.76,
-    transform: [{ scale: 0.99 }],
   },
 });

@@ -1,7 +1,5 @@
-import * as Application from 'expo-application';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Directory, File, Paths } from 'expo-file-system';
-import * as IntentLauncher from 'expo-intent-launcher';
 import { Linking, Platform } from 'react-native';
 
 const APK_MIME_TYPE = 'application/vnd.android.package-archive';
@@ -46,11 +44,8 @@ type LatestJson = Partial<Omit<RemoteAppVersion, 'tagName' | 'releaseUrl'>> & {
 };
 
 export function getInstalledAppVersion(): InstalledAppVersion {
-  const isExpoHost = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
-  const version = isExpoHost ? Constants.expoConfig?.version ?? '1.0.0' : Application.nativeApplicationVersion ?? Constants.expoConfig?.version ?? '1.0.0';
-  const rawBuildNumber = isExpoHost
-    ? String(Constants.expoConfig?.android?.versionCode ?? 0)
-    : Application.nativeBuildVersion ?? String(Constants.expoConfig?.android?.versionCode ?? 0);
+  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const rawBuildNumber = String(Constants.expoConfig?.android?.versionCode ?? 0);
   const buildNumber = Number.parseInt(rawBuildNumber, 10);
 
   return {
@@ -75,7 +70,7 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
     return {
       status: 'unsupported',
       current,
-      message: '当前完整包更新仅支持 Android。iOS 仍需要 App Store、TestFlight 或企业签名渠道。',
+      message: '当前平台不支持应用内更新。',
     };
   }
 
@@ -87,7 +82,7 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
         status: 'current',
         current,
         remote,
-        message: `当前已是最新版本：${current.version} (${current.buildNumber})。`,
+        message: '已是最新版本',
       };
     }
 
@@ -95,7 +90,7 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
       status: 'available',
       current,
       remote,
-      message: `发现新版本 ${remote.version} (${remote.buildNumber})，可以下载完整安装包。`,
+      message: `发现新版本 ${remote.version}`,
     };
   } catch (error) {
     return {
@@ -134,6 +129,7 @@ export async function installDownloadedApk(fileUri: string) {
   if (Platform.OS !== 'android') {
     throw new Error('APK 安装仅支持 Android。');
   }
+  const IntentLauncher = await import('expo-intent-launcher');
 
   const file = new File(fileUri);
   if (!file.exists) {
@@ -184,7 +180,7 @@ async function fetchLatestJson(url: string) {
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error('GitHub Release 里还没有 latest.json。先运行 Android Release 工作流发布完整安装包。');
+      throw new Error('暂未找到版本信息。');
     }
     throw new Error(`版本标记读取失败：HTTP ${response.status}`);
   }

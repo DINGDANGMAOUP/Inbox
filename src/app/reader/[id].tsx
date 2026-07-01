@@ -8,20 +8,23 @@ import {
   Alert,
   BackHandler,
   Keyboard,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, SlideInDown, SlideInUp, SlideOutDown, SlideOutUp } from 'react-native-reanimated';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AdaptiveSurface } from '@/components/reader/adaptive-surface';
 import { IconButton } from '@/components/reader/icon-button';
+import { M3FilterChip, M3Screen, M3SegmentedControl, M3StatePanel, M3Stepper } from '@/components/reader/m3';
+import { M3Pressable } from '@/components/reader/m3-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brand } from '@/constants/brand';
-import { themeAssets } from '@/constants/theme-assets';
+import { motion } from '@/constants/motion';
+import { readerThemeAssets } from '@/constants/theme-assets';
 import {
   createAnnotation,
   deleteAnnotation,
@@ -33,16 +36,10 @@ import {
   updateReaderPreferences,
 } from '@/lib/reader-service';
 import { cleanChapterTitle } from '@/lib/text-utils';
-import type { Annotation, Book, Chapter, ReaderPreferences, SearchResult } from '@/types/reader';
+import type { Annotation, Book, Chapter, ReaderPreferences, ReaderTheme, SearchResult } from '@/types/reader';
 
 type Panel = 'toc' | 'search' | 'notes' | 'settings' | null;
 type AnnotationFilter = 'all' | Annotation['type'];
-
-const themeValues: Record<ReaderPreferences['theme'], { bg: string; text: string; muted: string }> = {
-  mist: { bg: '#E8EBF2', text: '#263846', muted: '#667381' },
-  deep: { bg: brand.colors.readingInk, text: '#E8EBF2', muted: '#AEB8C2' },
-  reading: { bg: brand.colors.readingPaper, text: '#26313A', muted: '#7C817E' },
-};
 
 const annotationLabels: Record<Annotation['type'], string> = {
   bookmark: '书签',
@@ -50,15 +47,16 @@ const annotationLabels: Record<Annotation['type'], string> = {
   note: '笔记',
 };
 
-const themeLabels: Record<ReaderPreferences['theme'], string> = {
-  mist: '雾蓝',
-  deep: '深海',
-  reading: '阅读',
+const themeLabels: Record<ReaderTheme, string> = {
+  paper: '纸页',
+  sepia: '暖笺',
+  night: '夜读',
+  eink: '墨白',
 };
 
 const readingModeLabels: Record<ReaderPreferences['readingMode'], string> = {
-  scroll: '连续滚动',
-  page: '横向翻页',
+  scroll: '滚动',
+  page: '翻页',
 };
 
 const annotationFilters: { value: AnnotationFilter; label: string }[] = [
@@ -143,7 +141,7 @@ function renderTextBlock(block: string) {
 }
 
 function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
-  const theme = themeValues[preferences.theme];
+  const theme = brand.readerThemes[preferences.readerTheme];
   const paragraphs = chapter.textContent
     .replace(/\\r/g, '\n')
     .replace(/\r/g, '\n')
@@ -159,16 +157,20 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
   <style>
     body {
       margin: 0;
-      padding: 132px ${preferences.margin}px 330px;
-      background: var(--reader-bg, ${theme.bg});
+      padding: 112px ${preferences.margin}px 280px;
+      background: var(--reader-bg, ${theme.background});
       color: var(--reader-text, ${theme.text});
       font-family: "Songti SC", "Noto Serif CJK SC", "Noto Serif", Georgia, serif;
       font-size: var(--reader-font-size, ${preferences.fontSize}px);
       line-height: var(--reader-line-height, ${preferences.lineHeight});
       letter-spacing: 0;
       text-rendering: optimizeLegibility;
+      box-sizing: border-box;
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
     }
-    p { margin: 0 0 1.08em; }
+    p { margin: 0 0 1.12em; }
     h2 {
       margin: 1.25em 0 0.75em;
       font-size: 1.28em;
@@ -222,7 +224,7 @@ function readerScript() {
 }
 
 function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, reduceMotion: boolean, readerUiActive: boolean) {
-  const theme = themeValues[preferences.theme];
+  const theme = brand.readerThemes[preferences.readerTheme];
   return `
     (function() {
       var mode = "${preferences.readingMode}";
@@ -277,10 +279,10 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
       function applyMode() {
         document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
         document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
-        document.documentElement.style.setProperty("--reader-bg", "${theme.bg}");
+        document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
         document.documentElement.style.setProperty("--reader-text", "${theme.text}");
-        document.documentElement.style.background = "${theme.bg}";
-        document.body.style.background = "${theme.bg}";
+        document.documentElement.style.background = "${theme.background}";
+        document.body.style.background = "${theme.background}";
         document.body.style.color = "${theme.text}";
         document.body.style.fontSize = "${preferences.fontSize}px";
         document.body.style.lineHeight = "${preferences.lineHeight}";
@@ -450,6 +452,50 @@ function SearchExcerpt({ text, query }: { text: string; query: string }) {
   );
 }
 
+function ReaderToolChip({
+  icon,
+  label,
+  active,
+  tone = 'secondary',
+  onPress,
+  chromeTheme,
+}: {
+  icon: MaterialSymbolName;
+  label: string;
+  active: boolean;
+  tone?: 'primary' | 'secondary';
+  onPress: () => void;
+  chromeTheme: {
+    subtleSurface: string;
+    controlBorder: string;
+    text: string;
+    accent: string;
+    accentText: string;
+    primaryContainer: string;
+    onPrimaryContainer: string;
+  };
+}) {
+  const primary = tone === 'primary';
+  const backgroundColor = active ? chromeTheme.accent : primary ? chromeTheme.primaryContainer : chromeTheme.subtleSurface;
+  const color = active ? chromeTheme.accentText : primary ? chromeTheme.onPrimaryContainer : chromeTheme.text;
+
+  return (
+    <M3Pressable
+      onPress={onPress}
+      feedback={active ? 'subtle' : 'standard'}
+      style={[
+        styles.readerToolChip,
+        primary && styles.readerToolChipPrimary,
+        { backgroundColor, borderColor: active ? chromeTheme.accent : chromeTheme.controlBorder },
+      ]}>
+      <MaterialSymbol name={icon} color={color} description={label} size={17} />
+      <Text numberOfLines={1} style={[styles.readerToolChipText, { color }]}>
+        {label}
+      </Text>
+    </M3Pressable>
+  );
+}
+
 export default function ReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
@@ -460,7 +506,8 @@ export default function ReaderScreen() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [restoreRatio, setRestoreRatio] = useState(0);
   const [preferences, setPreferences] = useState<ReaderPreferences>({
-    theme: 'mist',
+    appThemeMode: 'system',
+    readerTheme: 'paper',
     fontSize: 19,
     lineHeight: 1.7,
     margin: 22,
@@ -479,17 +526,36 @@ export default function ReaderScreen() {
   const [pageStatus, setPageStatus] = useState({ pageIndex: 1, pageCount: 1 });
 
   const currentChapter = chapters[currentIndex];
-  const readerTheme = themeValues[preferences.theme];
-  const isDeepTheme = preferences.theme === 'deep';
+  const themeToken = brand.readerThemes[preferences.readerTheme];
+  const readerTheme = themeToken;
+  const chromePanelSurface = preferences.readerTheme === 'night' ? '#171A18' : '#151611';
+  const chromeSubtleSurface = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.075)' : 'rgba(255, 255, 255, 0.08)';
+  const chromeBorder = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.13)' : 'rgba(255, 255, 255, 0.11)';
   const chromeTheme = {
-    surface: isDeepTheme ? 'rgba(31, 44, 55, 0.92)' : brand.colors.paperElevated,
-    panelSurface: isDeepTheme ? '#1F2C37' : brand.colors.paperElevated,
-    subtleSurface: isDeepTheme ? 'rgba(232, 235, 242, 0.08)' : 'rgba(48, 67, 82, 0.065)',
-    border: isDeepTheme ? 'rgba(232, 235, 242, 0.14)' : 'rgba(255, 255, 255, 0.64)',
-    controlBorder: isDeepTheme ? 'rgba(232, 235, 242, 0.12)' : 'rgba(48, 67, 82, 0.10)',
-    text: isDeepTheme ? brand.colors.white : brand.colors.ink,
-    muted: isDeepTheme ? 'rgba(232, 235, 242, 0.70)' : brand.colors.muted,
-    accent: isDeepTheme ? '#D7D2CC' : brand.colors.copper,
+    surface: chromePanelSurface,
+    panelSurface: chromePanelSurface,
+    subtleSurface: chromeSubtleSurface,
+    border: chromeBorder,
+    controlBorder: chromeBorder,
+    text: '#F7F0E4',
+    muted: 'rgba(247, 240, 228, 0.62)',
+    accent: '#E7D9B7',
+    accentText: '#171811',
+    primaryContainer: '#E7D9B7',
+    onPrimaryContainer: '#171811',
+  };
+  const panelControlTheme = {
+    surface: chromeTheme.subtleSurface,
+    surfaceSolid: chromeTheme.panelSurface,
+    surfaceContainer: chromeTheme.subtleSurface,
+    surfaceContainerHigh: chromeTheme.subtleSurface,
+    primaryContainer: chromeTheme.primaryContainer,
+    onPrimaryContainer: chromeTheme.onPrimaryContainer,
+    text: chromeTheme.text,
+    muted: chromeTheme.muted,
+    accent: chromeTheme.accent,
+    accentText: chromeTheme.accentText,
+    line: chromeTheme.controlBorder,
   };
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentBookmark = useMemo(
@@ -782,18 +848,34 @@ export default function ReaderScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.loading, { backgroundColor: readerTheme.bg }]}>
-        <ActivityIndicator color={readerTheme.text} />
-        <Text style={[styles.loadingText, { color: readerTheme.text }]}>正在打开阅读器</Text>
-      </View>
+      <M3Screen key={`reader-loading-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+        <View style={styles.stateWrap}>
+          <M3StatePanel theme={themeToken} title="正在打开阅读器" body="正在恢复章节、主题和阅读进度。" artwork={<ActivityIndicator color={themeToken.accent} />} />
+        </View>
+      </M3Screen>
     );
   }
 
   if (!book || !currentChapter) {
     return (
-      <View style={[styles.loading, { backgroundColor: readerTheme.bg }]}>
-        <Text style={[styles.loadingText, { color: readerTheme.text }]}>未找到这本书</Text>
-      </View>
+      <M3Screen key={`reader-missing-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+        <View style={styles.stateWrap}>
+          <M3StatePanel
+            theme={themeToken}
+            title="未找到这本书"
+            body="这本书可能已被删除，或本机数据库仍在整理。"
+            artwork={<MaterialSymbol name="error" color={themeToken.accent} description="未找到这本书" size={28} />}>
+            <IconButton
+              icon="chevron.left"
+              label="返回书架"
+              tone="quiet"
+              tintColor={themeToken.text}
+              style={{ backgroundColor: themeToken.surfaceContainerHigh, borderColor: themeToken.line }}
+              onPress={() => router.back()}
+            />
+          </M3StatePanel>
+        </View>
+      </M3Screen>
     );
   }
 
@@ -803,11 +885,11 @@ export default function ReaderScreen() {
       : { html: readerHtmlForText(currentChapter, preferences) };
 
   return (
-    <View style={[styles.screen, { backgroundColor: readerTheme.bg }]}>
+    <View style={[styles.screen, { backgroundColor: readerTheme.background }]}>
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
           <WebView
-            key={`${currentChapter.id}-${preferences.theme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
+            key={`${currentChapter.id}-${preferences.readerTheme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
             ref={webViewRef}
             originWhitelist={['*']}
             source={readerSource}
@@ -815,22 +897,26 @@ export default function ReaderScreen() {
             injectedJavaScript={injectedJavaScript}
             javaScriptEnabled
             showsVerticalScrollIndicator={false}
-            style={[styles.webView, { backgroundColor: readerTheme.bg }]}
+            style={[styles.webView, { backgroundColor: readerTheme.background }]}
           />
         </View>
       </Link.AppleZoomTarget>
 
       {chromeVisible && (
         <Animated.View
-          entering={FadeIn.duration(reduceMotion ? 80 : 160)}
-          exiting={FadeOut.duration(140)}
+          entering={reduceMotion ? FadeIn.duration(80) : SlideInUp.duration(motion.duration.medium)}
+          exiting={reduceMotion ? FadeOut.duration(80) : SlideOutUp.duration(motion.duration.short)}
           style={styles.topChrome}>
           <AdaptiveSurface style={[styles.topBar, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
-            <Pressable
+            <IconButton
+              icon="chevron.left"
+              label="返回"
+              tone="quiet"
+              size="icon"
+              tintColor={chromeTheme.text}
+              style={[styles.backButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
               onPress={() => router.back()}
-              style={({ pressed }) => [styles.backButton, { backgroundColor: chromeTheme.subtleSurface }, pressed && styles.pressed]}>
-              <Text style={[styles.backText, { color: chromeTheme.text }]}>返回</Text>
-            </Pressable>
+            />
             <View style={styles.titleStack}>
               <Text numberOfLines={1} style={[styles.chromeTitle, { color: chromeTheme.text }]}>
                 {bookTitleLabel(book.title)}
@@ -849,18 +935,19 @@ export default function ReaderScreen() {
 
       {chromeVisible && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : SlideInDown.duration(180)}
-          exiting={SlideOutDown.duration(150)}
+          entering={reduceMotion ? FadeIn.duration(80) : SlideInDown.duration(motion.duration.medium)}
+          exiting={SlideOutDown.duration(motion.duration.short)}
           style={styles.bottomChrome}>
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <View style={[styles.chapterStrip, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-              <Pressable
+              <M3Pressable
                 disabled={currentIndex === 0}
                 onPress={() => goToChapter(Math.max(0, currentIndex - 1), preferences.readingMode === 'page' ? 1 : 0)}
-                style={({ pressed }) => [styles.chapterTextButton, currentIndex === 0 && styles.disabledChapterButton, pressed && styles.pressed]}>
+                feedback="subtle"
+                style={[styles.chapterTextButton, currentIndex === 0 && styles.disabledChapterButton]}>
                 <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>上一章</Text>
-              </Pressable>
-              <Pressable onPress={() => setPanel(panel === 'toc' ? null : 'toc')} style={({ pressed }) => [styles.chapterCenter, pressed && styles.pressed]}>
+              </M3Pressable>
+              <M3Pressable onPress={() => setPanel(panel === 'toc' ? null : 'toc')} feedback="subtle" style={styles.chapterCenter}>
                 <Text numberOfLines={1} style={[styles.chapterCenterTitle, { color: chromeTheme.text }]}>
                   {chapterLabel(currentChapter.title)}
                 </Text>
@@ -868,55 +955,20 @@ export default function ReaderScreen() {
                   {currentIndex + 1}/{chapters.length}
                   {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
                 </Text>
-              </Pressable>
-              <Pressable
+              </M3Pressable>
+              <M3Pressable
                 disabled={currentIndex >= chapters.length - 1}
                 onPress={() => goToChapter(Math.min(chapters.length - 1, currentIndex + 1), 0)}
-                style={({ pressed }) => [styles.chapterTextButton, currentIndex >= chapters.length - 1 && styles.disabledChapterButton, pressed && styles.pressed]}>
+                feedback="subtle"
+                style={[styles.chapterTextButton, currentIndex >= chapters.length - 1 && styles.disabledChapterButton]}>
                 <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>下一章</Text>
-              </Pressable>
+              </M3Pressable>
             </View>
-            <View style={styles.toolRow}>
-              <IconButton
-                style={[
-                  styles.dockButton,
-                  { backgroundColor: panel === 'toc' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
-                ]}
-                tintColor={panel === 'toc' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
-                icon="list.bullet"
-                label="目录"
-                onPress={() => setPanel(panel === 'toc' ? null : 'toc')}
-              />
-              <IconButton
-                style={[
-                  styles.dockButton,
-                  { backgroundColor: panel === 'search' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
-                ]}
-                tintColor={panel === 'search' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
-                icon="magnifyingglass"
-                label="搜索"
-                onPress={() => setPanel(panel === 'search' ? null : 'search')}
-              />
-              <IconButton
-                style={[
-                  styles.dockButton,
-                  { backgroundColor: panel === 'notes' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
-                ]}
-                tintColor={panel === 'notes' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
-                icon="note"
-                label="标注"
-                onPress={() => setPanel(panel === 'notes' ? null : 'notes')}
-              />
-              <IconButton
-                style={[
-                  styles.dockButton,
-                  { backgroundColor: panel === 'settings' ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
-                ]}
-                tintColor={panel === 'settings' ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text}
-                icon="textformat.size"
-                label="样式"
-                onPress={() => setPanel(panel === 'settings' ? null : 'settings')}
-              />
+            <View style={styles.readerToolRow}>
+              <ReaderToolChip icon="list.bullet" label="目录" tone="primary" active={panel === 'toc'} chromeTheme={chromeTheme} onPress={() => setPanel(panel === 'toc' ? null : 'toc')} />
+              <ReaderToolChip icon="magnifyingglass" label="搜索" active={panel === 'search'} chromeTheme={chromeTheme} onPress={() => setPanel(panel === 'search' ? null : 'search')} />
+              <ReaderToolChip icon="note" label="标注" active={panel === 'notes'} chromeTheme={chromeTheme} onPress={() => setPanel(panel === 'notes' ? null : 'notes')} />
+              <ReaderToolChip icon="textformat.size" label="样式" active={panel === 'settings'} chromeTheme={chromeTheme} onPress={() => setPanel(panel === 'settings' ? null : 'settings')} />
             </View>
           </AdaptiveSurface>
         </Animated.View>
@@ -924,47 +976,65 @@ export default function ReaderScreen() {
 
       {panel && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : SlideInDown.duration(180)}
-          exiting={SlideOutDown.duration(140)}
+          entering={reduceMotion ? FadeIn.duration(80) : SlideInDown.duration(motion.duration.medium)}
+          exiting={SlideOutDown.duration(motion.duration.short)}
           style={styles.panel}>
           <AdaptiveSurface style={[styles.panelSurface, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
+            <View style={[styles.panelHandle, { backgroundColor: chromeTheme.controlBorder }]} />
             <View style={styles.panelHeader}>
-              <Text style={[styles.panelTitle, { color: chromeTheme.text }]}>
-                {panel === 'toc' ? '目录' : panel === 'search' ? '书内搜索' : panel === 'settings' ? '阅读样式' : '标注与笔记'}
-              </Text>
-              <Pressable hitSlop={10} onPress={closePanel} style={({ pressed }) => [styles.closeButton, pressed && styles.pressed]}>
-                <Text style={[styles.closeText, { color: chromeTheme.muted }]}>关闭</Text>
-              </Pressable>
+              <View style={styles.panelTitleStack}>
+                <View style={styles.panelTitleRow}>
+                  <MaterialSymbol name={panelIcon(panel)} color={chromeTheme.accent} description={panelTitle(panel)} size={20} />
+                  <Text style={[styles.panelTitle, { color: chromeTheme.text }]}>{panelTitle(panel)}</Text>
+                </View>
+              </View>
+              <M3Pressable
+                accessibilityRole="button"
+                accessibilityLabel="关闭"
+                hitSlop={10}
+                onPress={closePanel}
+                feedback="subtle"
+                style={[styles.closeButton, { backgroundColor: chromeTheme.subtleSurface }]}>
+                <MaterialSymbol name="close" color={chromeTheme.text} description="关闭" size={18} />
+              </M3Pressable>
             </View>
 
             {panel === 'toc' && (
               <View style={styles.panelBody}>
-                <Text style={[styles.panelSummary, { color: chromeTheme.muted }]}>
-                  共 {chapters.length} 章 · 当前 {currentIndex + 1}/{chapters.length}
-                </Text>
                 <ScrollView contentContainerStyle={styles.panelList}>
                   {chapters.map((chapter, index) => {
                     const active = index === currentIndex;
                     return (
-                      <Pressable
+                      <M3Pressable
                         key={chapter.id}
                         onPress={() => goToChapter(index)}
-                        style={[styles.panelRow, styles.tocRow, active && styles.activePanelRow]}>
-                        <Text style={[styles.tocIndex, active && styles.activeTocIndex]}>{String(index + 1).padStart(2, '0')}</Text>
+                        feedback={active ? 'subtle' : 'standard'}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        style={[
+                          styles.panelRow,
+                          styles.tocRow,
+                          { backgroundColor: active ? chromeTheme.primaryContainer : chromeTheme.subtleSurface, borderColor: active ? chromeTheme.accent : chromeTheme.controlBorder },
+                        ]}>
+                        <Text style={[styles.tocIndex, { color: active ? chromeTheme.onPrimaryContainer : chromeTheme.muted }]}>
+                          {String(index + 1).padStart(2, '0')}
+                        </Text>
                         <View style={styles.tocContent}>
                           <View style={styles.tocTitleRow}>
-                            <Text numberOfLines={2} style={[styles.panelRowTitle, active && styles.activePanelRowTitle]}>
+                            <Text numberOfLines={2} style={[styles.panelRowTitle, { color: active ? chromeTheme.onPrimaryContainer : chromeTheme.text }]}>
                               {chapterLabel(chapter.title)}
                             </Text>
                             {active && (
-                              <View style={styles.currentBadge}>
-                                <Text style={styles.currentBadgeText}>当前</Text>
+                              <View style={[styles.currentBadge, { backgroundColor: chromeTheme.accent }]}>
+                                <Text style={[styles.currentBadgeText, { color: chromeTheme.accentText }]}>当前</Text>
                               </View>
                             )}
                           </View>
-                          <Text style={styles.panelRowMeta}>{chapter.wordCount.toLocaleString()} 字</Text>
+                          <Text style={[styles.panelRowMeta, { color: active ? chromeTheme.onPrimaryContainer : chromeTheme.muted }]}>
+                            {chapter.wordCount.toLocaleString()} 字
+                          </Text>
                         </View>
-                      </Pressable>
+                      </M3Pressable>
                     );
                   })}
                 </ScrollView>
@@ -984,13 +1054,15 @@ export default function ReaderScreen() {
                 />
                 <ScrollView contentContainerStyle={styles.panelList}>
                   {searchResults.map((result) => (
-                    <Pressable
+                    <M3Pressable
                       key={`${result.chapterId}-${result.matchOffset}`}
                       onPress={() => goToSearchResult(result)}
+                      feedback="standard"
+                      accessibilityRole="button"
                       style={[styles.panelRow, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
                       <Text style={[styles.panelRowTitle, { color: chromeTheme.text }]}>{chapterLabel(result.chapterTitle)}</Text>
                       <SearchExcerpt text={result.excerpt} query={searchQuery} />
-                    </Pressable>
+                    </M3Pressable>
                   ))}
                   {searchQuery.trim() && searchResults.length === 0 && (
                     <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
@@ -1005,25 +1077,36 @@ export default function ReaderScreen() {
             {panel === 'notes' && (
               <View style={styles.panelBody}>
                 <View style={styles.annotationQuickActions}>
-                  <Pressable
+                  <M3Pressable
                     onPress={addBookmark}
+                    feedback={currentBookmark ? 'subtle' : 'standard'}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: Boolean(currentBookmark) }}
                     style={[
                       styles.annotationActionCard,
                       { backgroundColor: currentBookmark ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
                     ]}>
-                    <Text style={[styles.annotationActionTitle, { color: currentBookmark ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text }]}>
-                      {currentBookmark ? '取消书签' : '本章书签'}
-                    </Text>
-                    <Text style={[styles.annotationActionBody, { color: currentBookmark ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.muted }]}>
+                    <View style={styles.annotationActionHeader}>
+                      <MaterialSymbol name={currentBookmark ? 'check.circle' : 'bookmark'} color={currentBookmark ? chromeTheme.accentText : chromeTheme.accent} description="本章书签" size={18} />
+                      <Text style={[styles.annotationActionTitle, { color: currentBookmark ? chromeTheme.accentText : chromeTheme.text }]}>
+                        {currentBookmark ? '取消书签' : '本章书签'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.annotationActionBody, { color: currentBookmark ? chromeTheme.accentText : chromeTheme.muted }]}>
                       {currentBookmark ? '已标记当前章' : '收藏当前位置'}
                     </Text>
-                  </Pressable>
-                  <Pressable
+                  </M3Pressable>
+                  <M3Pressable
                     onPress={() => webViewRef.current?.injectJavaScript('window.__INBOX_CAPTURE_SELECTION && window.__INBOX_CAPTURE_SELECTION(); true;')}
+                    feedback="standard"
+                    accessibilityRole="button"
                     style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-                    <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>划线</Text>
+                    <View style={styles.annotationActionHeader}>
+                      <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" size={18} />
+                      <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>划线</Text>
+                    </View>
                     <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>先选中文字</Text>
-                  </Pressable>
+                  </M3Pressable>
                 </View>
                 <TextInput
                   value={noteDraft}
@@ -1033,32 +1116,32 @@ export default function ReaderScreen() {
                   multiline
                   style={[styles.panelInput, styles.noteInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
                 />
-                <Pressable onPress={saveNote} style={({ pressed }) => [styles.saveNoteButton, pressed && styles.pressed]}>
+                <M3Pressable onPress={saveNote} feedback="standard" style={styles.saveNoteButton}>
                   <Text style={styles.saveNoteText}>保存笔记</Text>
-                </Pressable>
+                </M3Pressable>
                 <View style={styles.filterRow}>
                   {annotationFilters.map((filter) => {
                     const active = annotationFilter === filter.value;
                     return (
-                      <Pressable
+                      <M3FilterChip
                         key={filter.value}
+                        theme={panelControlTheme}
+                        selected={active}
+                        label={filter.label}
+                        count={annotationCounts[filter.value]}
+                        compact
                         onPress={() => setAnnotationFilter(filter.value)}
-                        style={[
-                          styles.filterChip,
-                          { backgroundColor: active ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
-                        ]}>
-                        <Text style={[styles.filterChipText, { color: active ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text }]}>
-                          {filter.label} {annotationCounts[filter.value]}
-                        </Text>
-                      </Pressable>
+                      />
                     );
                   })}
                 </View>
                 <ScrollView contentContainerStyle={styles.panelList}>
                   {filteredAnnotations.map((annotation) => (
-                    <Pressable
+                    <M3Pressable
                       key={annotation.id}
                       onPress={() => goToAnnotation(annotation)}
+                      feedback="standard"
+                      accessibilityRole="button"
                       style={[styles.panelRow, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
                       <View style={styles.annotationHeader}>
                         <Text style={[styles.annotationType, { color: chromeTheme.accent }]}>{annotationLabels[annotation.type]}</Text>
@@ -1071,21 +1154,24 @@ export default function ReaderScreen() {
                       </Text>
                       <View style={styles.annotationActions}>
                         <Text style={[styles.annotationHint, { color: chromeTheme.muted }]}>点按跳转</Text>
-                        <Pressable
+                        <M3Pressable
                           hitSlop={8}
-                          onPress={async () => {
+                          feedback="subtle"
+                          accessibilityRole="button"
+                          onPress={async (event) => {
+                            event.stopPropagation();
                             await deleteAnnotation(db, annotation.id);
                             setAnnotations(await listAnnotations(db, book.id));
                           }}>
                           <Text style={[styles.deleteText, { color: chromeTheme.accent }]}>删除</Text>
-                        </Pressable>
+                        </M3Pressable>
                       </View>
-                    </Pressable>
+                    </M3Pressable>
                   ))}
                   {filteredAnnotations.length === 0 && (
                     <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
                       <Text style={[styles.emptyPanelTitle, { color: chromeTheme.text }]}>还没有{annotationFilter === 'all' ? '标注' : annotationLabels[annotationFilter]}</Text>
-                      <Text style={[styles.emptyPanelBody, { color: chromeTheme.muted }]}>可以在正文里添加书签、划线或笔记，之后从这里快速找回。</Text>
+                      <Text style={[styles.emptyPanelBody, { color: chromeTheme.muted }]}>书签、划线和笔记会出现在这里。</Text>
                     </View>
                   )}
                 </ScrollView>
@@ -1094,61 +1180,59 @@ export default function ReaderScreen() {
 
             {panel === 'settings' && (
               <View style={styles.settingsPanel}>
-                <View style={[styles.modeSwitch, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-                  {(['scroll', 'page'] as const).map((mode) => {
-                    const active = preferences.readingMode === mode;
-                    return (
-                      <Pressable
-                        key={mode}
-                        onPress={() => updatePreference({ ...preferences, readingMode: mode })}
-                        style={[styles.modeButton, active && { backgroundColor: chromeTheme.accent }]}>
-                        <Text style={[styles.modeButtonText, { color: active ? (isDeepTheme ? brand.colors.ink : brand.colors.white) : chromeTheme.text }]}>
-                          {readingModeLabels[mode]}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <M3SegmentedControl
+                  theme={panelControlTheme}
+                  value={preferences.readingMode}
+                  options={(['scroll', 'page'] as const).map((mode) => ({
+                    value: mode,
+                    title: readingModeLabels[mode],
+                  }))}
+                  onChange={(readingMode) => updatePreference({ ...preferences, readingMode })}
+                />
                 <View style={styles.themeRow}>
-                  {brand.themeOrder.map((theme) => (
-                    <Pressable
+                  {brand.readerThemeOrder.map((theme) => (
+                    <M3Pressable
                       key={theme}
-                      onPress={() => updatePreference({ ...preferences, theme })}
+                      onPress={() => updatePreference({ ...preferences, readerTheme: theme })}
+                      feedback={preferences.readerTheme === theme ? 'subtle' : 'standard'}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: preferences.readerTheme === theme }}
                       style={[
                         styles.themeChip,
                         {
-                          backgroundColor: themeValues[theme].bg,
-                          borderColor: preferences.theme === theme ? brand.themes[theme].accent : brand.themes[theme].line,
+                          backgroundColor: preferences.readerTheme === theme ? brand.readerThemes[theme].primaryContainer : brand.readerThemes[theme].surfaceContainer,
+                          borderColor: preferences.readerTheme === theme ? brand.readerThemes[theme].accent : brand.readerThemes[theme].line,
                         },
                       ]}>
-                      <Image source={themeAssets[theme].cover} contentFit="cover" style={styles.themeChipImage} />
-                      <View style={[styles.themeChipOverlay, theme === 'deep' && styles.themeChipDeepOverlay]} />
-                      <Text style={[styles.themeChipText, { color: themeValues[theme].text }]}>{themeLabels[theme]}</Text>
-                    </Pressable>
+                      <Image source={readerThemeAssets[theme].cover} contentFit="cover" style={styles.themeChipImage} />
+                      <View style={[styles.themeChipOverlay, theme === 'night' && styles.themeChipDeepOverlay, preferences.readerTheme === theme && styles.activeThemeChipOverlay]} />
+                      {preferences.readerTheme === theme ? (
+                        <View style={[styles.themeChipCheck, { backgroundColor: brand.readerThemes[theme].accent }]}>
+                          <MaterialSymbol name="check" color={brand.readerThemes[theme].accentText} description="当前阅读主题" size={14} />
+                        </View>
+                      ) : null}
+                      <Text style={[styles.themeChipText, { color: preferences.readerTheme === theme ? brand.readerThemes[theme].onPrimaryContainer : brand.readerThemes[theme].text }]}>
+                        {themeLabels[theme]}
+                      </Text>
+                    </M3Pressable>
                   ))}
                 </View>
-                <View style={styles.stepperRow}>
-                  <Text style={[styles.stepperLabel, { color: chromeTheme.text }]}>字号 {preferences.fontSize}</Text>
-                  <View style={styles.stepperButtons}>
-                    <Pressable onPress={() => updatePreference({ ...preferences, fontSize: Math.max(15, preferences.fontSize - 1) })} style={styles.stepButton}>
-                      <Text style={styles.stepText}>-</Text>
-                    </Pressable>
-                    <Pressable onPress={() => updatePreference({ ...preferences, fontSize: Math.min(28, preferences.fontSize + 1) })} style={styles.stepButton}>
-                      <Text style={styles.stepText}>+</Text>
-                    </Pressable>
-                  </View>
-                </View>
-                <View style={styles.stepperRow}>
-                  <Text style={[styles.stepperLabel, { color: chromeTheme.text }]}>行距 {preferences.lineHeight.toFixed(1)}</Text>
-                  <View style={styles.stepperButtons}>
-                    <Pressable onPress={() => updatePreference({ ...preferences, lineHeight: Math.max(1.35, preferences.lineHeight - 0.1) })} style={styles.stepButton}>
-                      <Text style={styles.stepText}>-</Text>
-                    </Pressable>
-                    <Pressable onPress={() => updatePreference({ ...preferences, lineHeight: Math.min(2.2, preferences.lineHeight + 0.1) })} style={styles.stepButton}>
-                      <Text style={styles.stepText}>+</Text>
-                    </Pressable>
-                  </View>
-                </View>
+                <M3Stepper
+                  theme={panelControlTheme}
+                  label="字号"
+                  value={String(preferences.fontSize)}
+                  compact
+                  onMinus={() => updatePreference({ ...preferences, fontSize: Math.max(15, preferences.fontSize - 1) })}
+                  onPlus={() => updatePreference({ ...preferences, fontSize: Math.min(28, preferences.fontSize + 1) })}
+                />
+                <M3Stepper
+                  theme={panelControlTheme}
+                  label="行距"
+                  value={preferences.lineHeight.toFixed(1)}
+                  compact
+                  onMinus={() => updatePreference({ ...preferences, lineHeight: Math.max(1.35, preferences.lineHeight - 0.1) })}
+                  onPlus={() => updatePreference({ ...preferences, lineHeight: Math.min(2.2, preferences.lineHeight + 0.1) })}
+                />
               </View>
             )}
           </AdaptiveSurface>
@@ -1156,13 +1240,30 @@ export default function ReaderScreen() {
       )}
 
       {notice && (
-        <Animated.View entering={FadeIn.duration(reduceMotion ? 80 : 140)} exiting={FadeOut.duration(120)} style={styles.noticeToast}>
+        <Animated.View entering={FadeIn.duration(reduceMotion ? 80 : motion.duration.short)} exiting={FadeOut.duration(motion.duration.short)} style={styles.noticeToast}>
           <Text style={styles.noticeToastText}>{notice}</Text>
         </Animated.View>
       )}
 
     </View>
   );
+}
+
+function panelTitle(panel: Exclude<Panel, null>) {
+  return panel === 'toc' ? '目录' : panel === 'search' ? '搜索' : panel === 'settings' ? '样式' : '标注';
+}
+
+function panelIcon(panel: Exclude<Panel, null>): MaterialSymbolName {
+  switch (panel) {
+    case 'toc':
+      return 'list.bullet';
+    case 'search':
+      return 'magnifyingglass';
+    case 'settings':
+      return 'textformat.size';
+    case 'notes':
+      return 'note';
+  }
 }
 
 const styles = StyleSheet.create({
@@ -1175,47 +1276,34 @@ const styles = StyleSheet.create({
   webView: {
     flex: 1,
   },
-  loading: {
+  stateWrap: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    fontSize: 17,
-    fontWeight: '900',
-    letterSpacing: 0,
+    paddingHorizontal: 20,
   },
   topChrome: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    top: 44,
+    left: 16,
+    right: 16,
+    top: 48,
   },
   topBar: {
-    minHeight: 62,
-    borderRadius: brand.radius.medium,
+    minHeight: 56,
+    borderRadius: 24,
     borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
+    borderWidth: 1,
+    paddingHorizontal: 9,
     gap: 12,
-    backgroundColor: brand.colors.paperElevated,
-    borderColor: 'rgba(255, 255, 255, 0.64)',
-    boxShadow: brand.shadow.chrome,
+    boxShadow: '0 18px 38px rgba(0, 0, 0, 0.22)',
   },
   backButton: {
+    width: 42,
+    minWidth: 42,
     minHeight: 42,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingHorizontal: 0,
     borderRadius: brand.radius.round,
-    backgroundColor: 'rgba(48, 67, 82, 0.08)',
-  },
-  backText: {
-    color: brand.colors.ink,
-    fontSize: 14,
-    fontWeight: '900',
   },
   titleStack: {
     flex: 1,
@@ -1223,7 +1311,7 @@ const styles = StyleSheet.create({
   },
   chromeTitle: {
     color: brand.colors.ink,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -1240,38 +1328,32 @@ const styles = StyleSheet.create({
   },
   bottomChrome: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: 14,
+    left: 16,
+    right: 16,
+    bottom: 18,
   },
   readerDock: {
-    borderRadius: brand.radius.medium,
+    borderRadius: 28,
     borderCurve: 'continuous',
-    padding: 9,
-    gap: 8,
-    backgroundColor: brand.colors.paperElevated,
-    borderColor: 'rgba(255, 255, 255, 0.64)',
-    boxShadow: brand.shadow.chrome,
-  },
-  chapterControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
+    borderWidth: 1,
+    padding: 8,
+    gap: 7,
+    boxShadow: '0 22px 46px rgba(0, 0, 0, 0.28)',
   },
   chapterStrip: {
-    minHeight: 48,
-    borderRadius: brand.radius.medium,
+    minHeight: 46,
+    borderRadius: 20,
     borderCurve: 'continuous',
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 6,
+    gap: 5,
+    paddingHorizontal: 5,
     paddingVertical: 5,
   },
   chapterTextButton: {
-    minWidth: 64,
-    minHeight: 36,
+    minWidth: 58,
+    minHeight: 34,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: brand.radius.round,
@@ -1281,7 +1363,7 @@ const styles = StyleSheet.create({
     opacity: 0.36,
   },
   chapterTextButtonText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -1303,68 +1385,97 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     letterSpacing: 0,
   },
-  toolRow: {
+  readerToolRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
     justifyContent: 'space-between',
     gap: 6,
   },
-  dockButton: {
+  readerToolChip: {
     flex: 1,
     minWidth: 0,
-    minHeight: 38,
+    minHeight: 42,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
-    backgroundColor: 'rgba(48, 67, 82, 0.065)',
-    borderColor: 'rgba(48, 67, 82, 0.10)',
+    gap: 5,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.11)',
+  },
+  readerToolChipPrimary: {
+    flex: 1.35,
+  },
+  readerToolChipText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   panel: {
     position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    maxHeight: '72%',
+    left: 14,
+    right: 14,
+    bottom: 16,
+    maxHeight: '74%',
   },
   panelSurface: {
-    borderRadius: brand.radius.medium,
+    borderRadius: 28,
     borderCurve: 'continuous',
-    padding: 16,
-    gap: 14,
-    backgroundColor: brand.colors.paperElevated,
-    borderColor: 'rgba(255, 255, 255, 0.70)',
-    boxShadow: brand.shadow.chrome,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 14,
+    gap: 12,
+    boxShadow: '0 24px 52px rgba(0, 0, 0, 0.30)',
+  },
+  panelHandle: {
+    width: 42,
+    height: 4,
+    borderRadius: brand.radius.round,
+    alignSelf: 'center',
+    opacity: 0.84,
   },
   panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
+  },
+  panelTitleStack: {
+    flex: 1,
+    minWidth: 0,
+  },
+  panelTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   panelTitle: {
     color: brand.colors.ink,
-    fontSize: 20,
+    fontSize: 19,
+    lineHeight: 24,
     fontWeight: '900',
     letterSpacing: 0,
   },
   closeButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  closeText: {
-    color: brand.colors.island,
-    fontWeight: '900',
+    width: 38,
+    minWidth: 38,
+    minHeight: 38,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   panelBody: {
     gap: 12,
   },
-  panelSummary: {
-    color: brand.colors.muted,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
   panelInput: {
     minHeight: 48,
-    borderRadius: brand.radius.medium,
+    borderRadius: 18,
     borderCurve: 'continuous',
     backgroundColor: brand.colors.paperElevated,
     borderColor: brand.colors.line,
@@ -1372,7 +1483,7 @@ const styles = StyleSheet.create({
     color: brand.colors.ink,
     paddingHorizontal: 12,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   noteInput: {
     minHeight: 84,
@@ -1384,7 +1495,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   emptyPanelState: {
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 1,
     padding: 16,
@@ -1403,17 +1514,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   panelRow: {
-    borderRadius: brand.radius.medium,
+    borderRadius: 18,
     borderCurve: 'continuous',
     backgroundColor: 'rgba(247, 248, 251, 0.88)',
     borderWidth: 1,
     borderColor: brand.colors.line,
     padding: 12,
     gap: 6,
-  },
-  activePanelRow: {
-    borderColor: brand.colors.island,
-    backgroundColor: brand.colors.islandSoft,
   },
   tocRow: {
     flexDirection: 'row',
@@ -1427,9 +1534,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '900',
     letterSpacing: 0,
-  },
-  activeTocIndex: {
-    color: brand.colors.islandDeep,
   },
   tocContent: {
     flex: 1,
@@ -1449,40 +1553,37 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
   },
-  activePanelRowTitle: {
-    color: brand.colors.islandDeep,
-  },
   panelRowMeta: {
-    color: brand.colors.muted,
+    color: 'rgba(247, 240, 228, 0.62)',
     fontSize: 12,
     lineHeight: 17,
   },
   currentBadge: {
     borderRadius: brand.radius.round,
-    backgroundColor: brand.colors.island,
+    backgroundColor: '#E7D9B7',
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   currentBadgeText: {
-    color: brand.colors.white,
+    color: '#171811',
     fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0,
   },
   searchMatchText: {
-    color: brand.colors.ink,
-    backgroundColor: brand.colors.copperSoft,
+    color: '#171811',
+    backgroundColor: '#E7D9B7',
     fontWeight: '900',
   },
   saveNoteButton: {
     alignSelf: 'flex-start',
-    backgroundColor: brand.colors.ink,
+    backgroundColor: '#E7D9B7',
     borderRadius: brand.radius.round,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   saveNoteText: {
-    color: brand.colors.white,
+    color: '#171811',
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -1493,13 +1594,18 @@ const styles = StyleSheet.create({
   annotationActionCard: {
     flex: 1,
     minHeight: 68,
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 1,
     paddingHorizontal: 13,
     paddingVertical: 12,
     justifyContent: 'center',
     gap: 4,
+  },
+  annotationActionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
   annotationActionTitle: {
     color: brand.colors.ink,
@@ -1517,21 +1623,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-  },
-  filterChip: {
-    minHeight: 34,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  filterChipText: {
-    color: brand.colors.ink,
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 0,
   },
   annotationHeader: {
     flexDirection: 'row',
@@ -1569,29 +1660,6 @@ const styles = StyleSheet.create({
   settingsPanel: {
     gap: 14,
   },
-  modeSwitch: {
-    minHeight: 48,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    padding: 4,
-    flexDirection: 'row',
-    gap: 4,
-  },
-  modeButton: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  modeButtonText: {
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
   themeRow: {
     flexDirection: 'row',
     gap: 10,
@@ -1599,12 +1667,24 @@ const styles = StyleSheet.create({
   themeChip: {
     flex: 1,
     minHeight: 46,
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 2,
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  themeChipCheck: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 22,
+    height: 22,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   themeChipImage: {
     position: 'absolute',
@@ -1622,6 +1702,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(255, 255, 255, 0.18)',
   },
+  activeThemeChipOverlay: {
+    backgroundColor: 'rgba(234, 221, 255, 0.36)',
+  },
   themeChipDeepOverlay: {
     backgroundColor: 'rgba(9, 15, 20, 0.22)',
   },
@@ -1631,40 +1714,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     zIndex: 1,
   },
-  stepperRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  stepperLabel: {
-    color: brand.colors.ink,
-    fontWeight: '900',
-    fontSize: 16,
-  },
-  stepperButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  stepButton: {
-    width: 42,
-    height: 42,
-    borderRadius: brand.radius.round,
-    backgroundColor: brand.colors.ink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepText: {
-    color: brand.colors.white,
-    fontSize: 22,
-    fontWeight: '900',
-  },
   noticeToast: {
     position: 'absolute',
     left: 24,
     right: 24,
     top: 122,
     minHeight: 46,
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     backgroundColor: brand.colors.ink,
     borderWidth: 1,
@@ -1682,9 +1738,5 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     fontWeight: '900',
     letterSpacing: 0,
-  },
-  pressed: {
-    opacity: 0.72,
-    transform: [{ scale: 0.98 }],
   },
 });

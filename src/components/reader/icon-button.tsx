@@ -1,131 +1,118 @@
-import { Image } from 'expo-image';
-import { Host, Icon as MaterialIcon } from '@expo/ui/jetpack-compose';
-import { Platform, Pressable, StyleSheet, Text, type ImageSourcePropType, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';
-
-import AddIcon from '@expo/material-symbols/add.xml';
-import ArrowBackIcon from '@expo/material-symbols/arrow_back.xml';
-import ArrowForwardIcon from '@expo/material-symbols/arrow_forward.xml';
-import BookmarkIcon from '@expo/material-symbols/bookmark.xml';
-import ChevronRightIcon from '@expo/material-symbols/chevron_right.xml';
-import DrawIcon from '@expo/material-symbols/draw.xml';
-import FileOpenIcon from '@expo/material-symbols/file_open.xml';
-import InfoIcon from '@expo/material-symbols/info.xml';
-import ListIcon from '@expo/material-symbols/format_list_bulleted.xml';
-import SearchIcon from '@expo/material-symbols/search.xml';
-import SettingsIcon from '@expo/material-symbols/settings.xml';
-import StickyNoteIcon from '@expo/material-symbols/sticky_note.xml';
-import TextFieldsIcon from '@expo/material-symbols/text_fields.xml';
+import { StyleSheet, Text, View, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';
 
 import { brand } from '@/constants/brand';
-
-const androidIcons: Record<string, ImageSourcePropType> = {
-  bookmark: BookmarkIcon,
-  chevron: ChevronRightIcon,
-  'chevron.left': ArrowBackIcon,
-  'chevron.right': ArrowForwardIcon,
-  highlighter: DrawIcon,
-  info: InfoIcon,
-  'list.bullet': ListIcon,
-  magnifyingglass: SearchIcon,
-  plus: AddIcon,
-  settings: SettingsIcon,
-  note: StickyNoteIcon,
-  'textformat.size': TextFieldsIcon,
-  'tray.and.arrow.down': FileOpenIcon,
-};
+import { M3Pressable } from '@/components/reader/m3-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 
 type IconButtonProps = Omit<PressableProps, 'style'> & {
-  icon: string;
+  icon: MaterialSymbolName;
   label: string;
   tintColor?: string;
   tone?: 'light' | 'dark' | 'filled' | 'quiet';
+  size?: 'regular' | 'icon' | 'extended';
   style?: StyleProp<ViewStyle>;
 };
 
-export function IconButton({ icon, label, tintColor, tone = 'dark', style, ...props }: IconButtonProps) {
-  const resolvedTintColor = tintColor ?? (tone === 'light' || tone === 'filled' ? brand.colors.white : brand.colors.ink);
-  const androidIcon = androidIcons[icon] ?? AddIcon;
+export function IconButton({ icon, label, tintColor, tone = 'dark', size = 'regular', style, ...props }: IconButtonProps) {
+  const resolvedTintColor =
+    tintColor ??
+    (tone === 'filled'
+      ? brand.colors.onPrimary
+      : tone === 'light'
+        ? brand.colors.onPrimaryContainer
+        : tone === 'quiet'
+          ? brand.colors.ink
+          : brand.colors.onPrimaryContainer);
   const disabled = props.disabled;
   return (
-    <Pressable
-      accessibilityLabel={label}
-      hitSlop={10}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.button,
+        size === 'icon' && styles.iconButton,
+        size === 'extended' && styles.extendedButton,
         tone === 'light' && styles.lightButton,
         tone === 'filled' && styles.filledButton,
         tone === 'quiet' && styles.quietButton,
+        disabled && styles.disabledButton,
         style,
-        disabled && styles.disabled,
-        pressed && styles.pressed,
-      ]}
-      {...props}>
-      {Platform.OS === 'ios' ? (
-        <Image source={`sf:${icon}`} style={styles.icon} tintColor={resolvedTintColor} contentFit="contain" />
-      ) : Platform.OS === 'android' ? (
-        <Host matchContents style={styles.iconHost}>
-          <MaterialIcon source={androidIcon} size={18} tint={resolvedTintColor} contentDescription={label} />
-        </Host>
-      ) : (
-        <Text style={[styles.iconFallback, { color: resolvedTintColor }]}>{label.slice(0, 1).toUpperCase()}</Text>
+      ]}>
+      <MaterialSymbol name={icon} color={resolvedTintColor} description={label} size={18} style={styles.iconHost} />
+      {size !== 'icon' && (
+        <Text style={[styles.label, { color: resolvedTintColor }]} numberOfLines={1}>
+          {label}
+        </Text>
       )}
-      <Text style={[styles.label, { color: resolvedTintColor }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
+      <M3Pressable
+        accessibilityLabel={label}
+        disabled={disabled}
+        feedback={size === 'extended' ? 'standard' : 'subtle'}
+        hitSlop={10}
+        stateLayerColor={tone === 'filled' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(231, 217, 183, 0.20)'}
+        style={styles.touchOverlay}
+        {...props}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: 42,
-    paddingHorizontal: 14,
+    position: 'relative',
+    minHeight: 46,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    borderRadius: 999,
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: brand.radius.round,
     borderCurve: 'continuous',
-    backgroundColor: brand.colors.paperElevated,
+    backgroundColor: brand.colors.primaryContainer,
     borderWidth: 1,
-    borderColor: brand.colors.line,
+    borderColor: 'rgba(80, 73, 62, 0.12)',
+  },
+  iconButton: {
+    width: 48,
+    minWidth: 48,
+    minHeight: 48,
+    paddingHorizontal: 0,
+    gap: 0,
+  },
+  extendedButton: {
+    minHeight: 56,
+    paddingHorizontal: 22,
+    gap: 10,
   },
   lightButton: {
-    backgroundColor: 'rgba(48, 67, 82, 0.88)',
-    borderColor: 'rgba(255, 255, 255, 0.16)',
+    backgroundColor: brand.colors.primaryContainer,
+    borderColor: 'rgba(80, 73, 62, 0.14)',
   },
   filledButton: {
-    backgroundColor: brand.colors.ink,
-    borderColor: brand.colors.ink,
+    backgroundColor: brand.colors.primary,
+    borderColor: brand.colors.primary,
   },
   quietButton: {
-    backgroundColor: 'rgba(247, 248, 251, 0.72)',
-    borderColor: 'rgba(195, 203, 213, 0.70)',
+    backgroundColor: brand.colors.surfaceContainerHigh,
+    borderColor: 'rgba(80, 73, 62, 0.14)',
   },
-  pressed: {
-    opacity: 0.68,
-    transform: [{ scale: 0.98 }],
-  },
-  disabled: {
+  disabledButton: {
     opacity: 0.36,
-  },
-  icon: {
-    width: 17,
-    height: 17,
   },
   iconHost: {
     width: 18,
     height: 18,
   },
-  iconFallback: {
-    minWidth: 17,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
   label: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0,
+  },
+  touchOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
   },
 });

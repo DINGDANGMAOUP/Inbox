@@ -138,7 +138,6 @@ export function splitTxtIntoChapters(text: string) {
 
     return sections.filter((chapter) => chapter.text.trim());
   }
-
   const chapters: { title: string; text: string }[] = [];
   const targetLength = 7000;
   let cursor = 0;

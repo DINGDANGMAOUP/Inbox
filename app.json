@@ -14,12 +14,12 @@
       "package": "com.dingdangmaoup.inkbox",
       "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E8EBF2",
+        "backgroundColor": "#F8F7FF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false,
+      "predictiveBackGestureEnabled": true,
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -42,7 +42,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#E8EBF2",
+          "backgroundColor": "#F8F7FF",
           "image": "./assets/images/splash-icon.png",
           "android": {
             "image": "./assets/images/splash-icon.png",

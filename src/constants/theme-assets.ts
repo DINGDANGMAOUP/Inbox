@@ -1,6 +1,6 @@
 import type { ImageSourcePropType } from 'react-native';
 
-import type { ReaderTheme } from '@/types/reader';
+import type { ReaderTheme, ResolvedAppTheme } from '@/types/reader';
 
 type ThemeAssetSet = {
   background: ImageSourcePropType;
@@ -8,7 +8,7 @@ type ThemeAssetSet = {
   materialBoard: ImageSourcePropType;
 };
 
-export const themeAssets: Record<ReaderTheme, ThemeAssetSet> = {
+export const appThemeAssets: Record<ResolvedAppTheme, ThemeAssetSet> = {
   mist: {
     background: require('../../assets/images/themes/mist-background.png'),
     cover: require('../../assets/images/themes/mist-cover.png'),
@@ -19,9 +19,27 @@ export const themeAssets: Record<ReaderTheme, ThemeAssetSet> = {
     cover: require('../../assets/images/themes/deep-cover.png'),
     materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
   },
-  reading: {
+};
+
+export const readerThemeAssets: Record<ReaderTheme, ThemeAssetSet> = {
+  paper: {
     background: require('../../assets/images/themes/reading-background.png'),
     cover: require('../../assets/images/themes/reading-cover.png'),
+    materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
+  },
+  sepia: {
+    background: require('../../assets/images/themes/reading-background.png'),
+    cover: require('../../assets/images/themes/reading-cover.png'),
+    materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
+  },
+  night: {
+    background: require('../../assets/images/themes/deep-background.png'),
+    cover: require('../../assets/images/themes/deep-cover.png'),
+    materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
+  },
+  eink: {
+    background: require('../../assets/images/themes/mist-background.png'),
+    cover: require('../../assets/images/themes/mist-cover.png'),
     materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
   },
 };

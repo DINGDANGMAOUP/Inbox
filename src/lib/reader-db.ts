@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 3;
+const DATABASE_VERSION = 4;
 
 export async function migrateReaderDb(db: SQLiteDatabase) {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -76,6 +76,8 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
     CREATE TABLE IF NOT EXISTS reader_preferences (
       id TEXT PRIMARY KEY NOT NULL,
       theme TEXT NOT NULL,
+      app_theme_mode TEXT NOT NULL DEFAULT 'system',
+      reader_theme TEXT NOT NULL DEFAULT 'paper',
       font_size INTEGER NOT NULL,
       line_height REAL NOT NULL,
       margin INTEGER NOT NULL,
@@ -107,10 +109,32 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
   if (!preferenceColumns.some((column) => column.name === 'reading_mode')) {
     await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN reading_mode TEXT NOT NULL DEFAULT 'scroll';`);
   }
+  if (!preferenceColumns.some((column) => column.name === 'app_theme_mode')) {
+    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN app_theme_mode TEXT NOT NULL DEFAULT 'system';`);
+    await db.execAsync(`
+      UPDATE reader_preferences
+         SET app_theme_mode = CASE
+           WHEN theme = 'deep' THEN 'deep'
+           WHEN theme = 'mist' THEN 'mist'
+           WHEN theme = 'reading' THEN 'mist'
+           ELSE 'system'
+         END;
+    `);
+  }
+  if (!preferenceColumns.some((column) => column.name === 'reader_theme')) {
+    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN reader_theme TEXT NOT NULL DEFAULT 'paper';`);
+    await db.execAsync(`
+      UPDATE reader_preferences
+         SET reader_theme = CASE
+           WHEN theme = 'deep' THEN 'night'
+           ELSE 'paper'
+         END;
+    `);
+  }
 
   await db.runAsync(
-    `INSERT OR IGNORE INTO reader_preferences (id, theme, font_size, line_height, margin, reading_mode)
-     VALUES ('default', 'mist', 19, 1.7, 22, 'scroll')`
+    `INSERT OR IGNORE INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode)
+     VALUES ('default', 'mist', 'system', 'paper', 19, 1.7, 22, 'scroll')`
   );
 
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);

@@ -6,10 +6,12 @@ import { cleanChapterTitle, excerptAround, hashBytes, makeId, safeFileName, spli
 import type {
   Annotation,
   AnnotationType,
+  AppThemeMode,
   Book,
   Chapter,
   LibraryBook,
   ReaderPreferences,
+  ReaderTheme,
   SearchResult,
 } from '@/types/reader';
 
@@ -55,17 +57,27 @@ type AnnotationRow = {
 
 const readerDirectory = new Directory(Paths.document, 'inbox-reader');
 
-function normalizeReaderTheme(theme?: string | null): ReaderPreferences['theme'] {
-  if (theme === 'mist' || theme === 'deep' || theme === 'reading') {
+function normalizeAppThemeMode(theme?: string | null): AppThemeMode {
+  if (theme === 'system' || theme === 'mist' || theme === 'deep') {
     return theme;
   }
   if (theme === 'ink') {
     return 'deep';
   }
-  if (theme === 'sage') {
-    return 'reading';
+  return 'system';
+}
+
+function normalizeReaderTheme(theme?: string | null): ReaderTheme {
+  if (theme === 'paper' || theme === 'sepia' || theme === 'night' || theme === 'eink') {
+    return theme;
   }
-  return 'mist';
+  if (theme === 'deep' || theme === 'ink') {
+    return 'night';
+  }
+  if (theme === 'sage') {
+    return 'paper';
+  }
+  return 'paper';
 }
 
 function normalizeReadingMode(mode?: string | null): ReaderPreferences['readingMode'] {
@@ -426,14 +438,17 @@ export async function deleteAnnotation(db: SQLiteDatabase, id: string) {
 export async function getReaderPreferences(db: SQLiteDatabase): Promise<ReaderPreferences> {
   const row = await db.getFirstAsync<{
     theme: string;
+    app_theme_mode: string | null;
+    reader_theme: string | null;
     font_size: number;
     line_height: number;
     margin: number;
     reading_mode: string | null;
-  }>('SELECT theme, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?', 'default');
+  }>('SELECT theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?', 'default');
 
   return {
-    theme: normalizeReaderTheme(row?.theme),
+    appThemeMode: normalizeAppThemeMode(row?.app_theme_mode ?? row?.theme),
+    readerTheme: normalizeReaderTheme(row?.reader_theme ?? row?.theme),
     fontSize: row?.font_size ?? 19,
     lineHeight: row?.line_height ?? 1.7,
     margin: row?.margin ?? 22,
@@ -443,15 +458,19 @@ export async function getReaderPreferences(db: SQLiteDatabase): Promise<ReaderPr
 
 export async function updateReaderPreferences(db: SQLiteDatabase, preferences: ReaderPreferences) {
   await db.runAsync(
-    `INSERT INTO reader_preferences (id, theme, font_size, line_height, margin, reading_mode)
-     VALUES ('default', ?, ?, ?, ?, ?)
+    `INSERT INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode)
+     VALUES ('default', ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        theme = excluded.theme,
+       app_theme_mode = excluded.app_theme_mode,
+       reader_theme = excluded.reader_theme,
        font_size = excluded.font_size,
        line_height = excluded.line_height,
        margin = excluded.margin,
        reading_mode = excluded.reading_mode`,
-    preferences.theme,
+    preferences.appThemeMode === 'deep' ? 'deep' : 'mist',
+    preferences.appThemeMode,
+    preferences.readerTheme,
     preferences.fontSize,
     preferences.lineHeight,
     preferences.margin,

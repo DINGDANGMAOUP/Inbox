@@ -1,23 +1,34 @@
 import { useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
+import { useColorScheme, type ColorSchemeName } from 'react-native';
 
 import { getReaderPreferences, updateReaderPreferences } from '@/lib/reader-service';
-import type { ReaderPreferences } from '@/types/reader';
+import type { AppThemeMode, ReaderPreferences, ResolvedAppTheme } from '@/types/reader';
 
 export const defaultReaderPreferences: ReaderPreferences = {
-  theme: 'mist',
+  appThemeMode: 'system',
+  readerTheme: 'paper',
   fontSize: 19,
   lineHeight: 1.7,
   margin: 22,
   readingMode: 'scroll',
 };
 
+export function resolveAppTheme(mode: AppThemeMode, systemScheme?: ColorSchemeName): ResolvedAppTheme {
+  if (mode === 'mist' || mode === 'deep') {
+    return mode;
+  }
+  return systemScheme === 'dark' ? 'deep' : 'mist';
+}
+
 export function useReaderPreferences() {
   const db = useSQLiteContext();
+  const systemColorScheme = useColorScheme();
   const [preferences, setPreferences] = useState<ReaderPreferences>(defaultReaderPreferences);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const resolvedAppTheme = resolveAppTheme(preferences.appThemeMode, systemColorScheme);
 
   useFocusEffect(
     useCallback(() => {
@@ -56,6 +67,8 @@ export function useReaderPreferences() {
 
   return {
     preferences,
+    resolvedAppTheme,
+    systemColorScheme,
     loading,
     saving,
     updatePreferences,

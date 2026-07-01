@@ -38,11 +38,11 @@ export function AdaptiveSurface({
 const styles = StyleSheet.create({
   surface: {
     overflow: 'hidden',
-    backgroundColor: 'rgba(247, 248, 251, 0.82)',
+    backgroundColor: brand.colors.surfaceContainerHigh,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.64)',
+    borderColor: 'rgba(121, 116, 126, 0.18)',
   },
   androidSurface: {
-    backgroundColor: brand.colors.paperElevated,
+    backgroundColor: brand.colors.surfaceContainerHigh,
   },
 });

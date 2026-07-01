@@ -1,12 +1,15 @@
 import { router } from 'expo-router';
 import { Image } from 'expo-image';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { IconButton } from '@/components/reader/icon-button';
+import { M3InfoRow, M3ProgressRail, M3Screen, M3Section, M3SegmentedControl, M3StatePanel, M3StepRail, M3Stepper, M3TopAppBar } from '@/components/reader/m3';
+import { M3Pressable } from '@/components/reader/m3-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
-import { themeAssets } from '@/constants/theme-assets';
+import { appThemeAssets, readerThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
 import {
   checkForGithubAppUpdate,
@@ -17,26 +20,56 @@ import {
   openReleasePage,
   type RemoteAppVersion,
 } from '@/lib/app-update-service';
-import type { ReaderPreferences } from '@/types/reader';
+import type { AppThemeMode, ReaderPreferences, ReaderTheme, ResolvedAppTheme } from '@/types/reader';
 
 const readingModeCopy: Record<ReaderPreferences['readingMode'], { title: string; body: string }> = {
-  scroll: { title: '连续滚动', body: '适合长文和快速扫读' },
-  page: { title: '横向翻页', body: '正文左右区域翻页' },
+  scroll: { title: '滚动', body: '' },
+  page: { title: '翻页', body: '' },
 };
 
 type UpdatePhase = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error' | 'unsupported';
+type SettingsTheme = (typeof brand.appThemes)[ResolvedAppTheme];
+
+const appThemeModeCopy: Record<AppThemeMode, { title: string; body: string }> = {
+  system: { title: '跟随系统', body: '自动' },
+  mist: { title: '纸岛', body: '暖白' },
+  deep: { title: '夜岛', body: '黑色' },
+};
+
+const readerThemeCopy: Record<ReaderTheme, { title: string; body: string }> = {
+  paper: { title: '纸页', body: '暖白' },
+  sepia: { title: '暖笺', body: '柔和' },
+  night: { title: '夜读', body: '暗色' },
+  eink: { title: '墨白', body: '高对比' },
+};
 
 export default function SettingsScreen() {
-  const { preferences, loading, saving, updatePreferences } = useReaderPreferences();
-  const theme = brand.themes[preferences.theme];
+  const { preferences, resolvedAppTheme, loading, saving, updatePreferences } = useReaderPreferences();
+  const theme = brand.appThemes[resolvedAppTheme];
+  const chromeTheme = {
+    ...theme,
+    surface: '#151611',
+    surfaceSolid: '#151611',
+    surfaceContainer: 'rgba(255, 255, 255, 0.08)',
+    surfaceContainerHigh: 'rgba(255, 255, 255, 0.12)',
+    text: '#F7F0E4',
+    muted: 'rgba(247, 240, 228, 0.62)',
+    accent: '#E7D9B7',
+    accentText: '#171811',
+    primaryContainer: '#E7D9B7',
+    onPrimaryContainer: '#171811',
+    line: 'rgba(255, 255, 255, 0.12)',
+  };
   const installedVersion = useMemo(() => getInstalledAppVersion(), []);
   const updateSource = useMemo(() => getUpdateSourceInfo(), []);
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('idle');
-  const [updateMessage, setUpdateMessage] = useState('从 GitHub Release 检查完整安装包，下载后由 Android 系统确认安装。');
+  const [updateMessage, setUpdateMessage] = useState('检查应用更新');
   const [remoteUpdate, setRemoteUpdate] = useState<RemoteAppVersion | undefined>();
   const [downloadedApkUri, setDownloadedApkUri] = useState<string | undefined>();
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadBytes, setDownloadBytes] = useState({ written: 0, total: 0 });
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | undefined>();
+  const autoCheckedRef = useRef(false);
 
   const updatePreference = useCallback(
     async (next: ReaderPreferences) => {
@@ -68,6 +101,7 @@ export default function SettingsScreen() {
     setDownloadProgress(0);
     setDownloadBytes({ written: 0, total: 0 });
     const result = await checkForGithubAppUpdate();
+    setLastCheckedAt(new Date().toISOString());
     setUpdateMessage(result.message);
 
     if (result.status === 'available') {
@@ -80,13 +114,21 @@ export default function SettingsScreen() {
     setUpdatePhase(result.status);
   }, []);
 
+  useEffect(() => {
+    if (autoCheckedRef.current) {
+      return;
+    }
+    autoCheckedRef.current = true;
+    checkUpdate();
+  }, [checkUpdate]);
+
   const downloadUpdate = useCallback(async () => {
     if (!remoteUpdate) {
       return;
     }
 
     setUpdatePhase('downloading');
-    setUpdateMessage('正在下载完整安装包，请保持网络连接。');
+    setUpdateMessage('正在下载');
     try {
       const file = await downloadGithubApk(remoteUpdate, (progress, written, total) => {
         setDownloadProgress(progress);
@@ -95,7 +137,7 @@ export default function SettingsScreen() {
       setDownloadedApkUri(file.uri);
       setDownloadProgress(1);
       setUpdatePhase('downloaded');
-      setUpdateMessage('安装包已下载完成，下一步会交给 Android 系统安装器确认。');
+      setUpdateMessage('下载完成');
     } catch (error) {
       setUpdatePhase('error');
       setUpdateMessage(error instanceof Error ? error.message : '下载更新失败。');
@@ -108,7 +150,7 @@ export default function SettingsScreen() {
     }
 
     setUpdatePhase('installing');
-    setUpdateMessage('正在打开 Android 安装器。若系统要求，请允许从此来源安装应用。');
+    setUpdateMessage('打开安装器');
     try {
       await installDownloadedApk(downloadedApkUri);
       setUpdatePhase('downloaded');
@@ -119,160 +161,152 @@ export default function SettingsScreen() {
   }, [downloadedApkUri]);
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
-      <Image
-        key={`settings-background-${preferences.theme}`}
-        source={themeAssets[preferences.theme].background}
-        contentFit="cover"
-        transition={180}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={[styles.scrim, { backgroundColor: preferences.theme === 'deep' ? 'rgba(48, 67, 82, 0.18)' : theme.overlay }]} />
+    <M3Screen
+      key={`settings-screen-${resolvedAppTheme}`}
+      theme={theme}
+      backgroundSource={appThemeAssets[resolvedAppTheme].background}
+      overlayColor={resolvedAppTheme === 'deep' ? 'rgba(8, 9, 6, 0.36)' : 'rgba(247, 243, 234, 0.78)'}>
       <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
-        <View style={styles.header}>
-          <IconButton icon="chevron.left" label="返回" tone="quiet" onPress={() => router.back()} />
-          <View style={styles.brandCluster}>
-            <Image source={brandAssets.logoMark} contentFit="cover" style={styles.logo} />
-            <View style={styles.titleStack}>
-              <Text style={[styles.eyebrow, { color: theme.muted }]}>MOYU SETTINGS</Text>
-              <Text style={[styles.title, { color: theme.text }]}>设置</Text>
+        <M3TopAppBar
+          theme={chromeTheme}
+          title="设置"
+          subtitle="Private Library"
+          logoSource={brandAssets.logoMark}
+          leading={
+            <IconButton
+              icon="chevron.left"
+              label="返回"
+              tone="quiet"
+              tintColor="#F7F0E4"
+              size="icon"
+              style={[styles.headerBackButton, { backgroundColor: 'rgba(255, 255, 255, 0.08)', borderColor: 'rgba(255, 255, 255, 0.14)' }]}
+              onPress={() => router.back()}
+            />
+          }
+          trailing={
+            <View style={styles.saveBadge}>
+              <Text style={styles.headerMeta}>{saving ? '保存中' : '已保存'}</Text>
             </View>
-          </View>
-          <Text style={[styles.headerMeta, { color: theme.accent }]}>{saving ? '保存中' : '本机生效'}</Text>
-        </View>
+          }
+        />
 
         {loading ? (
-          <View style={styles.loadingCard}>
-            <ActivityIndicator color={brand.colors.ink} />
-            <Text style={styles.loadingText}>正在读取偏好</Text>
-          </View>
+          <M3StatePanel theme={theme} title="正在读取偏好" artwork={<ActivityIndicator color={theme.accent} />} />
         ) : (
           <>
-            <Section title="阅读默认值" kicker="READER" theme={theme}>
-              <Text style={styles.sectionLead}>这里设置新打开书籍时的默认阅读体验。阅读器内仍可临时调整。</Text>
+            <M3Section title="外观" theme={theme} order={0}>
               <View style={styles.themeGrid}>
-                {brand.themeOrder.map((theme) => {
-                  const token = brand.themes[theme];
-                  const active = preferences.theme === theme;
+                {brand.appThemeModes.map((themeMode) => {
+                  const previewTheme = themeMode === 'system' ? resolvedAppTheme : themeMode;
+                  const token = brand.appThemes[previewTheme];
+                  const active = preferences.appThemeMode === themeMode;
+                  const copy = appThemeModeCopy[themeMode];
                   return (
-                    <Pressable
-                      key={theme}
-                      onPress={() => updatePreference({ ...preferences, theme })}
-                      style={[styles.themeCard, active && styles.activeCard]}>
-                      <Image source={themeAssets[theme].cover} contentFit="cover" style={styles.themeImage} />
-                      <View style={styles.themeScrim} />
-                      <Text style={[styles.themeTitle, active && styles.activeText]}>{token.label}</Text>
-                      <Text style={[styles.themeBody, active && styles.activeSubtleText]}>{token.description}</Text>
-                    </Pressable>
+                    <M3Pressable
+                      key={themeMode}
+                      onPress={() => updatePreference({ ...preferences, appThemeMode: themeMode })}
+                      feedback={active ? 'subtle' : 'standard'}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={[styles.themeCard, { borderColor: active ? '#151611' : theme.line }, active && styles.activeThemeCard]}>
+                      <Image source={appThemeAssets[previewTheme].cover} contentFit="cover" style={styles.themeImage} />
+                      <View style={[styles.themeScrim, { backgroundColor: active ? 'rgba(21, 22, 17, 0.18)' : 'rgba(247, 240, 228, 0.56)' }]} />
+                      {active ? (
+                        <View style={styles.themeSelectedMark}>
+                          <MaterialSymbol name="check" color="#171811" description="当前主题" size={16} />
+                        </View>
+                      ) : null}
+                      <View style={[styles.themeTextPanel, { backgroundColor: active ? '#151611' : token.surfaceSolid, borderColor: active ? 'rgba(255, 255, 255, 0.10)' : token.line }]}>
+                        <Text numberOfLines={1} style={[styles.themeTitle, { color: active ? '#F7F0E4' : token.text }]}>
+                          {copy.title}
+                        </Text>
+                        <Text numberOfLines={1} style={[styles.themeBody, { color: active ? 'rgba(247, 240, 228, 0.66)' : token.muted }]}>
+                          {copy.body}
+                        </Text>
+                      </View>
+                    </M3Pressable>
+                  );
+                })}
+              </View>
+            </M3Section>
+
+            <M3Section title="阅读" theme={theme} order={1}>
+              <View style={styles.themeGrid}>
+                {brand.readerThemeOrder.map((readerTheme) => {
+                  const token = brand.readerThemes[readerTheme];
+                  const active = preferences.readerTheme === readerTheme;
+                  const copy = readerThemeCopy[readerTheme];
+                  return (
+                    <M3Pressable
+                      key={readerTheme}
+                      onPress={() => updatePreference({ ...preferences, readerTheme })}
+                      feedback={active ? 'subtle' : 'standard'}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={[styles.themeCard, { borderColor: active ? '#151611' : theme.line }, active && styles.activeThemeCard]}>
+                      <Image source={readerThemeAssets[readerTheme].cover} contentFit="cover" style={styles.themeImage} />
+                      <View style={[styles.themeScrim, { backgroundColor: readerTheme === 'night' ? 'rgba(10, 10, 14, 0.20)' : 'rgba(247, 240, 228, 0.50)' }]} />
+                      {active ? (
+                        <View style={styles.themeSelectedMark}>
+                          <MaterialSymbol name="check" color="#171811" description="当前阅读主题" size={16} />
+                        </View>
+                      ) : null}
+                      <View style={[styles.themeTextPanel, { backgroundColor: active ? '#151611' : token.surfaceSolid, borderColor: active ? 'rgba(255, 255, 255, 0.10)' : token.line }]}>
+                        <Text numberOfLines={1} style={[styles.themeTitle, { color: active ? '#F7F0E4' : token.text }]}>
+                          {copy.title}
+                        </Text>
+                        <Text numberOfLines={1} style={[styles.themeBody, { color: active ? 'rgba(247, 240, 228, 0.66)' : token.muted }]}>
+                          {copy.body}
+                        </Text>
+                      </View>
+                    </M3Pressable>
                   );
                 })}
               </View>
 
-              <View style={styles.modeRow}>
-                {(['scroll', 'page'] as const).map((mode) => {
-                  const active = preferences.readingMode === mode;
-                  return (
-                    <Pressable
-                      key={mode}
-                      onPress={() => updatePreference({ ...preferences, readingMode: mode })}
-                      style={[styles.modeCard, active && styles.activeModeCard]}>
-                      <Text style={[styles.modeTitle, active && styles.activeText]}>{readingModeCopy[mode].title}</Text>
-                      <Text style={[styles.modeBody, active && styles.activeSubtleText]}>{readingModeCopy[mode].body}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <M3SegmentedControl
+                theme={theme}
+                value={preferences.readingMode}
+                options={(['scroll', 'page'] as const).map((mode) => ({
+                  value: mode,
+                  title: readingModeCopy[mode].title,
+                }))}
+                onChange={(readingMode) => updatePreference({ ...preferences, readingMode })}
+              />
 
-              <Stepper label="字号" value={String(preferences.fontSize)} minus={() => stepPreference('fontSize', -1)} plus={() => stepPreference('fontSize', 1)} />
-              <Stepper
+              <M3Stepper theme={theme} label="字号" value={String(preferences.fontSize)} onMinus={() => stepPreference('fontSize', -1)} onPlus={() => stepPreference('fontSize', 1)} />
+              <M3Stepper
+                theme={theme}
                 label="行距"
                 value={preferences.lineHeight.toFixed(1)}
-                minus={() => stepPreference('lineHeight', -0.1)}
-                plus={() => stepPreference('lineHeight', 0.1)}
+                onMinus={() => stepPreference('lineHeight', -0.1)}
+                onPlus={() => stepPreference('lineHeight', 0.1)}
               />
-              <Stepper label="页边距" value={String(preferences.margin)} minus={() => stepPreference('margin', -2)} plus={() => stepPreference('margin', 2)} />
-            </Section>
+              <M3Stepper theme={theme} label="页边距" value={String(preferences.margin)} onMinus={() => stepPreference('margin', -2)} onPlus={() => stepPreference('margin', 2)} />
+            </M3Section>
 
-            <Section title="书架与导入" kicker="LIBRARY" theme={theme}>
-              <InfoRow title="导入格式" value="EPUB / TXT" />
-              <InfoRow title="存储位置" value="仅本机 Documents" />
-              <InfoRow title="删除方式" value="书架长按书籍" />
-            </Section>
-
-            <Section title="应用更新" kicker="GITHUB RELEASE" theme={theme}>
+            <M3Section title="更新" theme={theme} order={2}>
               <UpdatePanel
                 theme={theme}
                 phase={updatePhase}
                 message={updateMessage}
                 sourceLabel={updateSource.label}
-                repository={updateSource.repository}
                 installedVersion={installedVersion.version}
                 installedBuild={installedVersion.buildNumber}
                 remoteUpdate={remoteUpdate}
                 progress={downloadProgress}
                 bytes={downloadBytes}
+                lastCheckedAt={lastCheckedAt}
                 onCheck={checkUpdate}
                 onDownload={downloadUpdate}
                 onInstall={installUpdate}
                 onOpenRelease={() => openReleasePage(remoteUpdate)}
               />
-            </Section>
-
-            <Section title="数据与隐私" kicker="LOCAL FIRST" theme={theme}>
-              <InfoRow title="账号" value="不需要" />
-              <InfoRow title="云同步" value="不上传" />
-              <InfoRow title="阅读数据" value="本地 SQLite" />
-            </Section>
+            </M3Section>
           </>
         )}
       </ScrollView>
-    </View>
-  );
-}
-
-function Section({
-  title,
-  kicker,
-  theme,
-  children,
-}: {
-  title: string;
-  kicker: string;
-  theme: (typeof brand.themes)[ReaderPreferences['theme']];
-  children: ReactNode;
-}) {
-  return (
-    <View style={[styles.section, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-      <Text style={[styles.sectionKicker, { color: theme.accent }]}>{kicker}</Text>
-      <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
-      <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
-}
-
-function Stepper({ label, value, minus, plus }: { label: string; value: string; minus: () => void; plus: () => void }) {
-  return (
-    <View style={styles.stepper}>
-      <Text style={styles.stepperLabel}>{label}</Text>
-      <View style={styles.stepperControls}>
-        <Pressable onPress={minus} style={styles.roundControl}>
-          <Text style={styles.roundControlText}>-</Text>
-        </Pressable>
-        <Text style={styles.stepperValue}>{value}</Text>
-        <Pressable onPress={plus} style={styles.roundControl}>
-          <Text style={styles.roundControlText}>+</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function InfoRow({ title, value }: { title: string; value: string }) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoTitle}>{title}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
-    </View>
+    </M3Screen>
   );
 }
 
@@ -281,27 +315,27 @@ function UpdatePanel({
   phase,
   message,
   sourceLabel,
-  repository,
   installedVersion,
   installedBuild,
   remoteUpdate,
   progress,
   bytes,
+  lastCheckedAt,
   onCheck,
   onDownload,
   onInstall,
   onOpenRelease,
 }: {
-  theme: (typeof brand.themes)[ReaderPreferences['theme']];
+  theme: SettingsTheme;
   phase: UpdatePhase;
   message: string;
   sourceLabel: string;
-  repository: string;
   installedVersion: string;
   installedBuild: number;
   remoteUpdate?: RemoteAppVersion;
   progress: number;
   bytes: { written: number; total: number };
+  lastCheckedAt?: string;
   onCheck: () => void;
   onDownload: () => void;
   onInstall: () => void;
@@ -310,80 +344,77 @@ function UpdatePanel({
   const busy = phase === 'checking' || phase === 'downloading' || phase === 'installing';
   const canDownload = phase === 'available' && Boolean(remoteUpdate);
   const canInstall = phase === 'downloaded';
-  const primaryLabel = phase === 'checking' ? '检查中' : phase === 'downloading' ? '下载中' : phase === 'installing' ? '打开安装器' : canInstall ? '安装更新' : canDownload ? '下载更新' : '检查更新';
+  const primaryLabel = phase === 'checking' ? '检查中' : phase === 'downloading' ? '下载中' : phase === 'installing' ? '安装器' : canInstall ? '安装' : canDownload ? '下载' : '检查';
   const primaryAction = canInstall ? onInstall : canDownload ? onDownload : onCheck;
   const progressPercent = Math.round(progress * 100);
 
   return (
     <View style={styles.updatePanel}>
-      <View style={styles.updateHero}>
+      <View style={[styles.updateHero, { backgroundColor: theme.surfaceContainer }]}>
         <View style={[styles.updateOrb, { backgroundColor: theme.accent }]}>
-          <Text style={styles.updateOrbText}>{phase === 'current' ? '✓' : phase === 'error' ? '!' : '↓'}</Text>
+          <MaterialSymbol name={updatePhaseIcon(phase)} color={theme.accentText} description={updatePhaseTitle(phase)} size={24} />
         </View>
         <View style={styles.updateHeroText}>
-          <Text style={styles.updateTitle}>{updatePhaseTitle(phase)}</Text>
-          <Text style={styles.updateCaption}>{message}</Text>
+          <Text style={[styles.updateTitle, { color: theme.text }]}>{updatePhaseTitle(phase)}</Text>
+          <Text style={[styles.updateCaption, { color: theme.muted }]}>{message}</Text>
         </View>
       </View>
 
-      <View style={styles.updateSteps}>
-        {(['检查', '下载', '安装'] as const).map((step, index) => {
-          const active = updateStepIndex(phase) >= index;
-          return (
-            <View key={step} style={styles.updateStep}>
-              <View style={[styles.updateStepDot, active && { backgroundColor: theme.accent, borderColor: theme.accent }]} />
-              <Text style={[styles.updateStepText, active && { color: theme.text }]}>{step}</Text>
-            </View>
-          );
-        })}
-      </View>
+      <M3StepRail theme={theme} steps={['检查', '下载', '安装']} activeIndex={updateStepIndex(phase)} />
 
       <View style={styles.infoBlock}>
-        <InfoRow title="当前版本" value={`${installedVersion} (${installedBuild || '开发'})`} />
-        <InfoRow title="更新来源" value={sourceLabel} />
-        <InfoRow title="仓库" value={repository} />
+        <M3InfoRow theme={theme} title="当前版本" value={`${installedVersion} (${installedBuild || '开发'})`} />
+        <M3InfoRow theme={theme} title="检查时间" value={lastCheckedAt ? formatCheckedAt(lastCheckedAt) : '未检查'} />
+        <M3InfoRow theme={theme} title="来源" value={sourceLabel} />
         {remoteUpdate ? (
           <>
-            <InfoRow title="最新版本" value={`${remoteUpdate.version} (${remoteUpdate.buildNumber})`} />
-            <InfoRow title="安装包" value={remoteUpdate.apkSize ? formatBytes(remoteUpdate.apkSize) : 'GitHub APK'} />
+            <M3InfoRow theme={theme} title="最新版本" value={`${remoteUpdate.version} (${remoteUpdate.buildNumber})`} />
+            <M3InfoRow theme={theme} title="大小" value={remoteUpdate.apkSize ? formatBytes(remoteUpdate.apkSize) : '待获取'} />
           </>
         ) : null}
       </View>
 
       {remoteUpdate ? (
-        <View style={styles.releaseNoteBox}>
-          <Text style={styles.releaseNoteTitle}>{remoteUpdate.force ? '重要更新' : '更新说明'}</Text>
-          <Text style={styles.releaseNoteText} numberOfLines={5}>
+        <View style={[styles.releaseNoteBox, { backgroundColor: theme.surfaceContainer }]}>
+          <Text style={[styles.releaseNoteTitle, { color: theme.text }]}>{remoteUpdate.force ? '重要更新' : '更新说明'}</Text>
+          <Text style={[styles.releaseNoteText, { color: theme.muted }]} numberOfLines={2}>
             {remoteUpdate.releaseNotes}
           </Text>
         </View>
       ) : null}
 
       {phase === 'downloading' || phase === 'downloaded' ? (
-        <View style={styles.downloadBox}>
-          <View style={styles.downloadMeta}>
-            <Text style={styles.downloadLabel}>{phase === 'downloaded' ? '下载完成' : `下载进度 ${progressPercent}%`}</Text>
-            <Text style={styles.downloadBytes}>{formatDownloadProgress(bytes)}</Text>
-          </View>
-          <View style={styles.downloadTrack}>
-            <View style={[styles.downloadFill, { width: `${Math.max(4, progressPercent)}%`, backgroundColor: theme.accent }]} />
-          </View>
-        </View>
+        <M3ProgressRail
+          theme={theme}
+          label={phase === 'downloaded' ? '下载完成' : `下载进度 ${progressPercent}%`}
+          value={phase === 'downloaded' ? 1 : progress}
+          detail={formatDownloadProgress(bytes)}
+        />
       ) : null}
 
       <View style={styles.updateActions}>
-        <Pressable
+        <M3Pressable
           disabled={busy}
           onPress={primaryAction}
-          style={({ pressed }) => [styles.updateButton, { backgroundColor: theme.accent }, busy && styles.disabledButton, pressed && styles.pressed]}>
-          <Text style={styles.updateButtonText}>{primaryLabel}</Text>
-        </Pressable>
-        <Pressable onPress={onOpenRelease} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-          <Text style={styles.secondaryButtonText}>查看 Release</Text>
-        </Pressable>
+          feedback="standard"
+          stateLayerColor="rgba(255, 255, 255, 0.18)"
+          style={[styles.updateButton, { backgroundColor: theme.accent }, busy && styles.disabledButton]}>
+          <MaterialSymbol name={updatePhaseIcon(phase)} color={theme.accentText} description={primaryLabel} size={17} />
+          <Text style={[styles.updateButtonText, { color: theme.accentText }]}>{primaryLabel}</Text>
+        </M3Pressable>
+        <M3Pressable
+          onPress={onOpenRelease}
+          feedback="subtle"
+          style={[
+            styles.secondaryButton,
+            { backgroundColor: theme.surfaceContainerHigh, borderColor: theme.line },
+          ]}>
+          <MaterialSymbol name="info" color={theme.text} description="查看 Release" size={16} />
+          <Text style={[styles.secondaryButtonText, { color: theme.text }]}>查看 Release</Text>
+        </M3Pressable>
       </View>
 
-      <Text style={styles.updateFinePrint}>完整更新会跳转到 Android 系统安装器。首次安装 GitHub APK 时，系统可能要求允许此来源。</Text>
+      <Text style={[styles.updateFinePrint, { color: theme.muted }]}>下载后由 Android 确认安装。</Text>
     </View>
   );
 }
@@ -391,23 +422,41 @@ function UpdatePanel({
 function updatePhaseTitle(phase: UpdatePhase) {
   switch (phase) {
     case 'checking':
-      return '正在检查新版本';
+      return '检查中';
     case 'current':
-      return '已经是最新';
+      return '已是最新';
     case 'available':
-      return '发现完整更新';
+      return '发现新版本';
     case 'downloading':
-      return '正在下载 APK';
+      return '下载中';
     case 'downloaded':
       return '准备安装';
     case 'installing':
-      return '等待系统确认';
+      return '等待确认';
     case 'unsupported':
       return '当前平台不支持';
     case 'error':
-      return '更新遇到问题';
+      return '更新失败';
     default:
-      return '完整包更新';
+      return '应用更新';
+  }
+}
+
+function updatePhaseIcon(phase: UpdatePhase): MaterialSymbolName {
+  switch (phase) {
+    case 'checking':
+      return 'refresh';
+    case 'current':
+    case 'downloaded':
+      return 'check.circle';
+    case 'error':
+    case 'unsupported':
+      return 'error';
+    case 'available':
+    case 'downloading':
+      return 'download';
+    default:
+      return 'download';
   }
 }
 
@@ -438,118 +487,71 @@ function formatDownloadProgress(bytes: { written: number; total: number }) {
   return `${formatBytes(bytes.written)} / ${formatBytes(bytes.total)}`;
 }
 
+function formatCheckedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '刚刚';
+  }
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: brand.colors.paper,
-  },
-  scrim: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: 'rgba(232, 235, 242, 0.34)',
-  },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 58,
+    paddingTop: 52,
     paddingBottom: 42,
-    gap: 18,
+    gap: 20,
   },
-  header: {
-    gap: 16,
+  headerBackButton: {
+    width: 48,
+    minWidth: 48,
+    paddingHorizontal: 0,
   },
-  brandCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  logo: {
-    width: 58,
-    height: 58,
-    borderRadius: 15,
-  },
-  titleStack: {
-    flex: 1,
-    minWidth: 0,
-  },
-  eyebrow: {
-    color: brand.colors.muted,
+  headerMeta: {
+    color: '#171811',
     fontSize: 12,
     fontWeight: '900',
   },
-  title: {
-    color: brand.colors.ink,
-    fontSize: 40,
-    lineHeight: 46,
-    fontWeight: '900',
-  },
-  headerMeta: {
-    color: brand.colors.island,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  loadingCard: {
-    minHeight: 180,
-    borderRadius: brand.radius.medium,
+  saveBadge: {
+    minHeight: 34,
+    borderRadius: brand.radius.round,
     borderCurve: 'continuous',
+    backgroundColor: '#E7D9B7',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    backgroundColor: brand.colors.paperElevated,
-  },
-  loadingText: {
-    color: brand.colors.ink,
-    fontWeight: '900',
-  },
-  section: {
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.72)',
-    backgroundColor: 'rgba(247, 248, 251, 0.84)',
-    padding: 18,
-    gap: 8,
-    boxShadow: brand.shadow.card,
-  },
-  sectionKicker: {
-    color: brand.colors.copper,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  sectionTitle: {
-    color: brand.colors.ink,
-    fontSize: 22,
-    lineHeight: 27,
-    fontWeight: '900',
-  },
-  sectionLead: {
-    color: brand.colors.muted,
-    fontSize: 13,
-    lineHeight: 20,
-    fontWeight: '700',
-  },
-  sectionBody: {
-    gap: 12,
+    paddingHorizontal: 12,
   },
   themeGrid: {
     flexDirection: 'row',
-    gap: 10,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   themeCard: {
-    flex: 1,
-    minHeight: 82,
+    flexGrow: 1,
+    flexBasis: '48%',
+    minHeight: 96,
     borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    padding: 12,
+    padding: 8,
     justifyContent: 'flex-end',
     borderWidth: 1,
     borderColor: 'rgba(48, 67, 82, 0.12)',
   },
-  activeCard: {
-    borderColor: brand.colors.island,
+  activeThemeCard: {
+    backgroundColor: '#151611',
+  },
+  themeSelectedMark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    backgroundColor: '#E7D9B7',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   themeImage: {
     position: 'absolute',
@@ -564,7 +566,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(247, 248, 251, 0.34)',
+    backgroundColor: 'rgba(247, 248, 251, 0.46)',
+  },
+  themeTextPanel: {
+    borderRadius: brand.radius.small,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 1,
   },
   themeTitle: {
     color: brand.colors.ink,
@@ -573,104 +583,7 @@ const styles = StyleSheet.create({
   },
   themeBody: {
     color: brand.colors.muted,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  activeText: {
-    color: brand.colors.ink,
-  },
-  activeSubtleText: {
-    color: brand.colors.islandDeep,
-  },
-  modeRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modeCard: {
-    flex: 1,
-    minHeight: 72,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: brand.colors.line,
-    backgroundColor: brand.colors.paperElevated,
-    padding: 13,
-    justifyContent: 'center',
-    gap: 4,
-  },
-  activeModeCard: {
-    borderColor: brand.colors.island,
-    backgroundColor: brand.colors.islandSoft,
-  },
-  modeTitle: {
-    color: brand.colors.ink,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  modeBody: {
-    color: brand.colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  stepper: {
-    minHeight: 56,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(232, 235, 242, 0.62)',
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  stepperLabel: {
-    color: brand.colors.ink,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  stepperControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  roundControl: {
-    width: 40,
-    height: 40,
-    borderRadius: brand.radius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: brand.colors.ink,
-  },
-  roundControlText: {
-    color: brand.colors.white,
-    fontSize: 22,
-    lineHeight: 24,
-    fontWeight: '900',
-  },
-  stepperValue: {
-    minWidth: 36,
-    textAlign: 'center',
-    color: brand.colors.ink,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  infoRow: {
-    minHeight: 48,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(195, 203, 213, 0.58)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  infoTitle: {
-    color: brand.colors.ink,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  infoValue: {
-    color: brand.colors.muted,
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: '800',
   },
   updatePanel: {
@@ -681,9 +594,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 14,
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(232, 235, 242, 0.54)',
+    backgroundColor: brand.colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: 'rgba(80, 73, 62, 0.14)',
   },
   updateOrb: {
     width: 44,
@@ -691,12 +606,6 @@ const styles = StyleSheet.create({
     borderRadius: brand.radius.round,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  updateOrbText: {
-    color: brand.colors.white,
-    fontSize: 22,
-    lineHeight: 24,
-    fontWeight: '900',
   },
   updateHeroText: {
     flex: 1,
@@ -715,41 +624,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
-  updateSteps: {
-    minHeight: 42,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(255, 255, 255, 0.52)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-  },
-  updateStep: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  updateStepDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(109, 128, 143, 0.38)',
-    backgroundColor: 'transparent',
-  },
-  updateStepText: {
-    color: brand.colors.muted,
-    fontSize: 12,
-    fontWeight: '900',
-  },
   infoBlock: {
     gap: 0,
   },
   releaseNoteBox: {
-    borderRadius: brand.radius.medium,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(255, 255, 255, 0.48)',
+    backgroundColor: brand.colors.surfaceContainer,
     padding: 14,
     gap: 6,
   },
@@ -764,39 +645,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: '700',
   },
-  downloadBox: {
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(232, 235, 242, 0.58)',
-    padding: 13,
-    gap: 10,
-  },
-  downloadMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-  },
-  downloadLabel: {
-    color: brand.colors.ink,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  downloadBytes: {
-    color: brand.colors.muted,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  downloadTrack: {
-    height: 8,
-    borderRadius: brand.radius.round,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(195, 203, 213, 0.72)',
-  },
-  downloadFill: {
-    height: '100%',
-    borderRadius: brand.radius.round,
-  },
   updateActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -808,13 +656,16 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 7,
     paddingHorizontal: 18,
     paddingVertical: 10,
+    backgroundColor: '#151611',
   },
   updateButtonText: {
-    color: brand.colors.white,
+    color: '#F7F0E4',
     fontSize: 14,
     fontWeight: '900',
     letterSpacing: 0,
@@ -823,13 +674,15 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 7,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: 'rgba(48, 67, 82, 0.18)',
-    backgroundColor: 'rgba(255, 255, 255, 0.46)',
+    borderColor: 'rgba(121, 116, 126, 0.20)',
+    backgroundColor: brand.colors.surfaceContainerHigh,
   },
   secondaryButtonText: {
     color: brand.colors.ink,
@@ -844,9 +697,5 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.62,
-  },
-  pressed: {
-    opacity: 0.72,
-    transform: [{ scale: 0.98 }],
   },
 });

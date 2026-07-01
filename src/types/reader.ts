@@ -2,7 +2,11 @@ export type BookFormat = 'epub' | 'txt';
 
 export type AnnotationType = 'bookmark' | 'highlight' | 'note';
 
-export type ReaderTheme = 'mist' | 'deep' | 'reading';
+export type AppThemeMode = 'system' | 'mist' | 'deep';
+
+export type ResolvedAppTheme = 'mist' | 'deep';
+
+export type ReaderTheme = 'paper' | 'sepia' | 'night' | 'eink';
 
 export type ReadingMode = 'scroll' | 'page';
 
@@ -50,7 +54,8 @@ export type Annotation = {
 };
 
 export type ReaderPreferences = {
-  theme: ReaderTheme;
+  appThemeMode: AppThemeMode;
+  readerTheme: ReaderTheme;
   fontSize: number;
   lineHeight: number;
   margin: number;
