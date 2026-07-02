@@ -8,11 +8,13 @@ import {
   Alert,
   BackHandler,
   Keyboard,
+  type LayoutChangeEvent,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,7 +42,9 @@ import { cleanChapterTitle } from '@/lib/text-utils';
 import type { Annotation, Book, Chapter, ReaderPreferences, ReaderTheme, SearchResult } from '@/types/reader';
 
 type Panel = 'toc' | 'search' | 'notes' | 'settings' | null;
+type ReaderPanel = Exclude<Panel, null>;
 type AnnotationFilter = 'all' | Annotation['type'];
+type ReaderInsets = { top: number; bottom: number };
 
 const annotationLabels: Record<Annotation['type'], string> = {
   bookmark: '书签',
@@ -65,6 +69,13 @@ const annotationFilters: { value: AnnotationFilter; label: string }[] = [
   { value: 'bookmark', label: '书签' },
   { value: 'highlight', label: '划线' },
   { value: 'note', label: '笔记' },
+];
+
+const readerPanelTabs: { value: ReaderPanel; label: string; icon: MaterialSymbolName }[] = [
+  { value: 'toc', label: '目录', icon: 'list.bullet' },
+  { value: 'search', label: '搜索', icon: 'magnifyingglass' },
+  { value: 'notes', label: '标注', icon: 'note' },
+  { value: 'settings', label: '样式', icon: 'textformat.size' },
 ];
 
 function chapterLabel(title: string) {
@@ -224,15 +235,29 @@ function readerScript() {
   </script>`;
 }
 
-function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, reduceMotion: boolean, readerUiActive: boolean) {
+function preferenceScript(
+  preferences: ReaderPreferences,
+  restoreRatio: number,
+  reduceMotion: boolean,
+  readerUiActive: boolean,
+  readerPanelActive: boolean,
+  readerInsets: ReaderInsets
+) {
   const theme = brand.readerThemes[preferences.readerTheme];
+  const initialInsets = {
+    top: Math.max(32, Math.round(readerInsets.top)),
+    bottom: Math.max(48, Math.round(readerInsets.bottom)),
+  };
   return `
     (function() {
       var mode = "${preferences.readingMode}";
       var margin = ${preferences.margin};
       var reduceMotion = ${reduceMotion ? 'true' : 'false'};
       var restoreRatio = ${restoreRatio};
+      var initialInsets = ${JSON.stringify(initialInsets)};
+      window.__INBOX_READER_INSETS__ = initialInsets;
       window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'};
+      window.__INBOX_PANEL_ACTIVE__ = ${readerPanelActive ? 'true' : 'false'};
 
       function postMessage(payload) {
         window.ReactNativeWebView.postMessage(JSON.stringify(payload));
@@ -277,7 +302,16 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
         });
       }
 
+      function normalizedInsets() {
+        var next = window.__INBOX_READER_INSETS__ || initialInsets;
+        return {
+          top: Math.max(32, Math.round(Number(next.top) || initialInsets.top)),
+          bottom: Math.max(48, Math.round(Number(next.bottom) || initialInsets.bottom))
+        };
+      }
+
       function applyMode() {
+        var safeInsets = normalizedInsets();
         document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
         document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
         document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
@@ -290,6 +324,8 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
         document.body.style.boxSizing = "border-box";
         document.body.style.paddingLeft = margin + "px";
         document.body.style.paddingRight = margin + "px";
+        document.body.style.paddingTop = safeInsets.top + "px";
+        document.body.style.paddingBottom = safeInsets.bottom + "px";
 
         if (mode === "page") {
           document.documentElement.style.height = "100%";
@@ -298,8 +334,6 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
           document.body.style.minHeight = "100vh";
           document.body.style.height = "100vh";
           document.body.style.overflow = "visible";
-          document.body.style.paddingTop = "112px";
-          document.body.style.paddingBottom = "118px";
           document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
           document.body.style.columnGap = margin * 2 + "px";
           document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
@@ -313,13 +347,34 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
         document.body.style.minHeight = "auto";
         document.body.style.height = "auto";
         document.body.style.overflow = "visible";
-        document.body.style.paddingTop = "132px";
-        document.body.style.paddingBottom = "330px";
         document.body.style.columnWidth = "auto";
         document.body.style.columnGap = "normal";
         document.body.style.webkitColumnWidth = "auto";
         document.body.style.webkitColumnGap = "normal";
       }
+
+      window.__INBOX_APPLY_READER_LAYOUT__ = function(nextInsets, uiActive, panelActive) {
+        if (nextInsets) {
+          window.__INBOX_READER_INSETS__ = {
+            top: Math.max(0, Number(nextInsets.top) || 0),
+            bottom: Math.max(0, Number(nextInsets.bottom) || 0)
+          };
+        }
+        window.__INBOX_UI_ACTIVE__ = !!uiActive;
+        window.__INBOX_PANEL_ACTIVE__ = !!panelActive;
+        var ratio = mode === "page"
+          ? (pageCount() <= 1 ? 0 : pageIndex() / Math.max(1, pageCount() - 1))
+          : window.scrollY / maxVerticalScroll();
+        applyMode();
+        setTimeout(function() {
+          if (mode === "page") {
+            window.scrollTo({ left: Math.round(ratio * Math.max(1, pageCount() - 1)) * pageStep(), top: 0, behavior: "auto" });
+          } else {
+            window.scrollTo({ left: 0, top: ratio * maxVerticalScroll(), behavior: "auto" });
+          }
+          reportProgress();
+        }, 60);
+      };
 
       window.__INBOX_GO_PAGE = function(delta) {
         if (mode !== "page") {
@@ -362,6 +417,10 @@ function preferenceScript(preferences: ReaderPreferences, restoreRatio: number, 
           }
           var selection = window.getSelection ? window.getSelection().toString().trim() : "";
           if (selection) {
+            return;
+          }
+          if (window.__INBOX_PANEL_ACTIVE__) {
+            postMessage({ type: "dismissPanel" });
             return;
           }
           if (window.__INBOX_UI_ACTIVE__) {
@@ -503,6 +562,7 @@ export default function ReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
   const lastProgressSave = useRef(0);
   const [book, setBook] = useState<Book | null>(null);
@@ -528,6 +588,8 @@ export default function ReaderScreen() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pageStatus, setPageStatus] = useState({ pageIndex: 1, pageCount: 1 });
+  const [topChromeHeight, setTopChromeHeight] = useState(0);
+  const [bottomChromeHeight, setBottomChromeHeight] = useState(0);
 
   const currentChapter = chapters[currentIndex];
   const themeToken = brand.readerThemes[preferences.readerTheme];
@@ -586,6 +648,29 @@ export default function ReaderScreen() {
       { all: 0, bookmark: 0, highlight: 0, note: 0 } as Record<AnnotationFilter, number>
     );
   }, [annotations]);
+  const chromeTopOffset = Math.max(24, insets.top + 12);
+  const chromeBottomOffset = Math.max(16, insets.bottom + 12);
+  const bottomDockVisible = chromeVisible && panel === null;
+  const readerInsets = useMemo(
+    () => ({
+      top: chromeVisible ? Math.ceil(chromeTopOffset + (topChromeHeight || 64) + 20) : 42,
+      bottom: bottomDockVisible ? Math.ceil(chromeBottomOffset + (bottomChromeHeight || 118) + 26) : 68,
+    }),
+    [bottomChromeHeight, bottomDockVisible, chromeTopOffset, chromeVisible, chromeBottomOffset, topChromeHeight]
+  );
+  const panelHeight = panel
+    ? Math.min(windowHeight * (panel === 'search' ? 0.62 : 0.74), windowHeight - chromeTopOffset - 32)
+    : undefined;
+
+  const handleTopChromeLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setTopChromeHeight((height) => (height === nextHeight ? height : nextHeight));
+  }, []);
+
+  const handleBottomChromeLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setBottomChromeHeight((height) => (height === nextHeight ? height : nextHeight));
+  }, []);
 
   const closePanel = useCallback(() => {
     Keyboard.dismiss();
@@ -747,6 +832,12 @@ export default function ReaderScreen() {
         setChromeVisible(false);
       }
 
+      if (payload.type === 'dismissPanel') {
+        Keyboard.dismiss();
+        setPanel(null);
+        setChromeVisible(true);
+      }
+
       if (payload.type === 'progress' && typeof payload.ratio === 'number') {
         if (preferences.readingMode === 'page' && (typeof payload.pageIndex !== 'number' || typeof payload.pageCount !== 'number')) {
           return;
@@ -790,14 +881,25 @@ export default function ReaderScreen() {
   );
 
   const readerUiActive = chromeVisible || panel !== null;
+  const readerPanelActive = panel !== null;
   const injectedJavaScript = useMemo(
-    () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive),
-    [preferences, readerUiActive, reduceMotion, restoreRatio]
+    () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive, readerPanelActive, readerInsets),
+    [preferences, readerInsets, readerPanelActive, readerUiActive, reduceMotion, restoreRatio]
   );
 
   useEffect(() => {
-    webViewRef.current?.injectJavaScript(`window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'}; true;`);
-  }, [readerUiActive]);
+    const nextInsets = JSON.stringify(readerInsets);
+    webViewRef.current?.injectJavaScript(`
+      if (window.__INBOX_APPLY_READER_LAYOUT__) {
+        window.__INBOX_APPLY_READER_LAYOUT__(${nextInsets}, ${readerUiActive ? 'true' : 'false'}, ${readerPanelActive ? 'true' : 'false'});
+      } else {
+        window.__INBOX_READER_INSETS__ = ${nextInsets};
+        window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'};
+        window.__INBOX_PANEL_ACTIVE__ = ${readerPanelActive ? 'true' : 'false'};
+      }
+      true;
+    `);
+  }, [readerInsets, readerPanelActive, readerUiActive]);
 
   const saveNote = useCallback(async () => {
     if (!book || !currentChapter || !noteDraft.trim()) {
@@ -908,9 +1010,10 @@ export default function ReaderScreen() {
 
       {chromeVisible && (
         <Animated.View
+          onLayout={handleTopChromeLayout}
           entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeUp()}
           exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutUp()}
-          style={[styles.topChrome, { top: Math.max(24, insets.top + 12) }]}>
+          style={[styles.topChrome, { top: chromeTopOffset }]}>
           <AdaptiveSurface style={[styles.topBar, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <IconButton
               icon="chevron.left"
@@ -937,11 +1040,12 @@ export default function ReaderScreen() {
         </Animated.View>
       )}
 
-      {chromeVisible && (
+      {bottomDockVisible && (
         <Animated.View
+          onLayout={handleBottomChromeLayout}
           entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
           exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
-          style={[styles.bottomChrome, { bottom: Math.max(16, insets.bottom + 12) }]}>
+          style={[styles.bottomChrome, { bottom: chromeBottomOffset }]}>
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <View style={[styles.chapterStrip, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
               <M3Pressable
@@ -982,8 +1086,8 @@ export default function ReaderScreen() {
         <Animated.View
           entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
           exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
-          style={[styles.panel, { bottom: Math.max(16, insets.bottom + 12) }]}>
-          <AdaptiveSurface style={[styles.panelSurface, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
+          style={[styles.panel, { bottom: chromeBottomOffset }, panel === 'search' ? { height: panelHeight } : { maxHeight: panelHeight }]}>
+          <AdaptiveSurface style={[styles.panelSurface, panel === 'search' && styles.panelSurfaceFill, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
             <View style={[styles.panelHandle, { backgroundColor: chromeTheme.controlBorder }]} />
             <View style={styles.panelHeader}>
               <View style={styles.panelTitleStack}>
@@ -992,15 +1096,36 @@ export default function ReaderScreen() {
                   <Text style={[styles.panelTitle, { color: chromeTheme.text }]}>{panelTitle(panel)}</Text>
                 </View>
               </View>
-              <M3Pressable
-                accessibilityRole="button"
-                accessibilityLabel="关闭"
-                hitSlop={10}
+              <IconButton
+                icon="close"
+                label="关闭"
+                tone="quiet"
+                size="icon"
+                tintColor={chromeTheme.text}
                 onPress={closePanel}
-                feedback="subtle"
-                style={[styles.closeButton, { backgroundColor: chromeTheme.subtleSurface }]}>
-                <MaterialSymbol name="close" color={chromeTheme.text} description="关闭" decorative size={18} />
-              </M3Pressable>
+                style={[styles.closeButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
+              />
+            </View>
+
+            <View style={[styles.panelTabs, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+              {readerPanelTabs.map((item) => {
+                const active = panel === item.value;
+                return (
+                  <M3Pressable
+                    key={item.value}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={item.label}
+                    onPress={() => setPanel(item.value)}
+                    feedback={active ? 'subtle' : 'standard'}
+                    style={[styles.panelTab, active && { backgroundColor: chromeTheme.accent }]}>
+                    <MaterialSymbol name={item.icon} color={active ? chromeTheme.accentText : chromeTheme.text} description={item.label} decorative size={17} />
+                    <Text numberOfLines={1} style={[styles.panelTabText, { color: active ? chromeTheme.accentText : chromeTheme.text }]}>
+                      {item.label}
+                    </Text>
+                  </M3Pressable>
+                );
+              })}
             </View>
 
             {panel === 'toc' && (
@@ -1046,7 +1171,7 @@ export default function ReaderScreen() {
             )}
 
             {panel === 'search' && (
-              <View style={styles.panelBody}>
+              <View style={[styles.panelBody, styles.panelBodyFill]}>
                 <TextInput
                   value={searchQuery}
                   onChangeText={setSearchQuery}
@@ -1056,7 +1181,7 @@ export default function ReaderScreen() {
                   onSubmitEditing={Keyboard.dismiss}
                   style={[styles.panelInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
                 />
-                <ScrollView contentContainerStyle={styles.panelList}>
+                <ScrollView keyboardShouldPersistTaps="handled" style={styles.panelScroll} contentContainerStyle={styles.panelList}>
                   {searchResults.map((result) => (
                     <M3Pressable
                       key={`${result.chapterId}-${result.matchOffset}`}
@@ -1439,6 +1564,9 @@ const styles = StyleSheet.create({
     gap: 12,
     boxShadow: '0 18px 38px rgba(18, 20, 15, 0.24)',
   },
+  panelSurfaceFill: {
+    flex: 1,
+  },
   panelHandle: {
     width: 42,
     height: 4,
@@ -1477,8 +1605,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  panelTabs: {
+    minHeight: 44,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    padding: 5,
+  },
+  panelTab: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 34,
+    borderRadius: brand.radius.small,
+    borderCurve: 'continuous',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+  },
+  panelTabText: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
   panelBody: {
     gap: 12,
+  },
+  panelBodyFill: {
+    flex: 1,
+    minHeight: 0,
   },
   panelInput: {
     minHeight: 48,
@@ -1500,6 +1660,10 @@ const styles = StyleSheet.create({
   panelList: {
     gap: 10,
     paddingBottom: 12,
+  },
+  panelScroll: {
+    flex: 1,
+    minHeight: 0,
   },
   emptyPanelState: {
     borderRadius: brand.radius.large,
