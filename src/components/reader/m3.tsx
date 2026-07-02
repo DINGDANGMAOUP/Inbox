@@ -8,10 +8,11 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import Animated, { FadeIn, FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
+import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 
@@ -43,11 +44,8 @@ export function M3Screen({
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <Animated.View
-      entering={FadeIn.duration(motion.duration.screen)}
-      exiting={FadeOut.duration(motion.duration.medium)}
-      style={[styles.screen, { backgroundColor: theme.background ?? theme.surfaceSolid ?? theme.surface }, style]}>
-      <Image source={backgroundSource} contentFit="cover" transition={180} style={StyleSheet.absoluteFill} />
+    <Animated.View style={[styles.screen, { backgroundColor: theme.background ?? theme.surfaceSolid ?? theme.surface }, style]}>
+      <Image source={backgroundSource} contentFit="cover" style={StyleSheet.absoluteFill} />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: overlayColor ?? theme.overlay ?? 'transparent' }]} />
       {children}
     </Animated.View>
@@ -104,7 +102,7 @@ export function M3MetricCard({
   return (
     <View style={[styles.metricCard, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }]}>
       <View style={styles.metricHeader}>
-        {icon ? <MaterialSymbol name={icon} color={theme.accent} description={label} size={17} /> : null}
+        {icon ? <MaterialSymbol name={icon} color={theme.accent} description={label} decorative size={17} /> : null}
         <Text style={[styles.metricLabel, { color: theme.muted }]}>{label}</Text>
       </View>
       <Text numberOfLines={1} style={[styles.metricValue, { color: theme.text }]}>
@@ -133,8 +131,8 @@ export function M3StatePanel({
 }) {
   return (
     <Animated.View
-      entering={FadeInDown.delay(order * motion.stagger.section).duration(motion.duration.medium)}
-      layout={LinearTransition.duration(motion.duration.medium)}
+      entering={m3Motion.fadeDown(order * motion.stagger.section)}
+      layout={m3Motion.layoutMedium()}
       style={[styles.statePanel, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }, style]}>
       {artwork}
       <View style={styles.stateCopy}>
@@ -162,9 +160,9 @@ export function M3StepRail({
         return (
           <View key={step} style={styles.stepRailItem}>
             <Animated.View
-              layout={LinearTransition.duration(motion.duration.short)}
+              layout={m3Motion.layoutShort()}
               style={[styles.stepRailDot, { borderColor: theme.line }, active && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
-              {active ? <MaterialSymbol name="check" color={theme.accentText} description={step} size={12} /> : null}
+              {active ? <MaterialSymbol name="check" color={theme.accentText} description={step} decorative size={12} /> : null}
             </Animated.View>
             <Text numberOfLines={1} style={[styles.stepRailText, { color: active ? theme.text : theme.muted }]}>
               {step}
@@ -196,7 +194,7 @@ export function M3ProgressRail({
         <Text style={[styles.progressValue, { color: theme.muted }]}>{detail ?? `${percent}%`}</Text>
       </View>
       <View style={[styles.progressTrack, { backgroundColor: theme.line }]}>
-        <Animated.View layout={LinearTransition.duration(motion.duration.medium)} style={[styles.progressFill, { width: `${Math.max(4, percent)}%`, backgroundColor: theme.accent }]} />
+        <Animated.View layout={m3Motion.layoutMedium()} style={[styles.progressFill, { width: `${Math.max(4, percent)}%`, backgroundColor: theme.accent }]} />
       </View>
     </View>
   );
@@ -217,7 +215,7 @@ export function M3FeatureCard({
     <View style={[styles.featureCard, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }]}>
       {icon ? (
         <View style={[styles.featureIcon, { backgroundColor: theme.accent }]}>
-          <MaterialSymbol name={icon} color={theme.accentText} description={title} size={18} />
+          <MaterialSymbol name={icon} color={theme.accentText} description={title} decorative size={18} />
         </View>
       ) : null}
       <View style={styles.featureCopy}>
@@ -247,8 +245,8 @@ export function M3Section({
 }) {
   return (
     <Animated.View
-      entering={FadeInDown.delay(order * motion.stagger.section).duration(motion.duration.medium)}
-      layout={LinearTransition.duration(motion.duration.medium)}
+      entering={m3Motion.fadeDown(order * motion.stagger.section)}
+      layout={m3Motion.layoutMedium()}
       style={[styles.sectionShell, style]}>
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
@@ -275,7 +273,7 @@ export function M3InfoRow({
   return (
     <View style={[styles.infoRow, { borderBottomColor: theme.line }]}>
       <View style={styles.infoTitleCluster}>
-        {icon ? <MaterialSymbol name={icon} color={theme.accent} description={title} size={18} /> : null}
+        {icon ? <MaterialSymbol name={icon} color={theme.accent} description={title} decorative size={18} /> : null}
         <Text style={[styles.infoTitle, { color: theme.text }]}>{title}</Text>
       </View>
       <Text numberOfLines={2} style={[styles.infoValue, { color: theme.muted }]}>
@@ -315,7 +313,7 @@ export function M3Stepper({
           onPress={onMinus}
           feedback="strong"
           style={[styles.roundControl, { backgroundColor: controlBackground }]}>
-          <MaterialSymbol name="minus" color={controlColor} description={`减少${label}`} size={22} />
+          <MaterialSymbol name="minus" color={controlColor} description={`减少${label}`} decorative size={22} />
         </M3Pressable>
         <View style={[styles.stepperValuePill, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }]}>
           <Text style={[styles.stepperValue, { color: theme.text }]}>{value}</Text>
@@ -325,7 +323,7 @@ export function M3Stepper({
           onPress={onPlus}
           feedback="strong"
           style={[styles.roundControl, { backgroundColor: controlBackground }]}>
-          <MaterialSymbol name="plus" color={controlColor} description={`增加${label}`} size={22} />
+          <MaterialSymbol name="plus" color={controlColor} description={`增加${label}`} decorative size={22} />
         </M3Pressable>
       </View>
     </View>
@@ -356,13 +354,13 @@ export function M3FilterChip({
     <M3Pressable
       onPress={onPress}
       feedback={selected ? 'subtle' : 'standard'}
-          stateLayerColor={selected ? 'rgba(255, 255, 255, 0.18)' : 'rgba(231, 217, 183, 0.18)'}
+          stateLayerColor={selected ? 'rgba(255, 255, 255, 0.18)' : 'rgba(205, 232, 208, 0.18)'}
       style={[
         styles.filterChip,
         compact && styles.filterChipCompact,
         { backgroundColor: background, borderColor: selected ? theme.accent : theme.line },
       ]}>
-      {icon ? <MaterialSymbol name={icon} color={foreground} description={label} size={16} /> : selected ? <MaterialSymbol name="check" color={foreground} description={`${label} 已选中`} size={15} /> : null}
+      {icon ? <MaterialSymbol name={icon} color={foreground} description={label} decorative size={16} /> : selected ? <MaterialSymbol name="check" color={foreground} description={`${label} 已选中`} decorative size={15} /> : null}
       <Text numberOfLines={1} style={[styles.filterChipText, { color: foreground }]}>
         {count === undefined ? label : `${label} ${count}`}
       </Text>
@@ -390,13 +388,13 @@ export function M3SegmentedControl<Value extends string>({
             key={option.value}
             onPress={() => onChange(option.value)}
             feedback={active ? 'subtle' : 'standard'}
-            stateLayerColor={active ? 'rgba(255, 255, 255, 0.18)' : 'rgba(231, 217, 183, 0.16)'}
+            stateLayerColor={active ? 'rgba(255, 255, 255, 0.18)' : 'rgba(205, 232, 208, 0.16)'}
             style={[
               styles.segmentedItem,
               { backgroundColor: active ? theme.primaryContainer : theme.surfaceContainer, borderColor: active ? theme.accent : theme.line },
             ]}>
             <View style={styles.segmentedTitleRow}>
-              {active ? <MaterialSymbol name="check" color={theme.onPrimaryContainer} description={`${option.title} 已选中`} size={14} /> : null}
+              {active ? <MaterialSymbol name="check" color={theme.onPrimaryContainer} description={`${option.title} 已选中`} decorative size={14} /> : null}
               <Text style={[styles.segmentedTitle, { color: active ? theme.onPrimaryContainer : theme.text }]}>{option.title}</Text>
             </View>
             {option.body ? (
@@ -416,28 +414,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topAppBar: {
-    minHeight: 70,
-    borderRadius: 28,
+    minHeight: 66,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    boxShadow: '0 18px 36px rgba(0, 0, 0, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    boxShadow: brand.shadow.card,
   },
   appBarLogo: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: brand.radius.small,
   },
   appBarTitleStack: {
     flex: 1,
     minWidth: 0,
   },
   appBarTitle: {
-    fontSize: 20,
+    fontSize: 21,
     lineHeight: 25,
     fontWeight: '900',
     letterSpacing: 0,
@@ -449,19 +447,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   sectionShell: {
-    gap: 8,
+    gap: 10,
   },
   sectionHeader: {
-    paddingHorizontal: 2,
-    gap: 2,
+    paddingHorizontal: 4,
+    gap: 3,
   },
   sectionSurface: {
-    borderRadius: 24,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 1,
-    padding: 10,
-    gap: 10,
-    boxShadow: '0 14px 32px rgba(0, 0, 0, 0.10)',
+    padding: 12,
+    gap: 12,
+    boxShadow: brand.shadow.card,
   },
   sectionKicker: {
     fontSize: 12,
@@ -469,13 +467,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   sectionTitle: {
-    fontSize: 18,
-    lineHeight: 23,
+    fontSize: 20,
+    lineHeight: 24,
     fontWeight: '900',
     letterSpacing: 0,
   },
   infoRow: {
-    minHeight: 48,
+    minHeight: 54,
     borderBottomWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -505,14 +503,14 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     flex: 1,
-    minHeight: 74,
-    borderRadius: 22,
+    minHeight: 76,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     borderWidth: 1,
     justifyContent: 'space-between',
     paddingHorizontal: 14,
     paddingVertical: 12,
-    boxShadow: '0 8px 20px rgba(0, 0, 0, 0.07)',
+    boxShadow: '0 6px 16px rgba(18, 20, 15, 0.06)',
   },
   metricHeader: {
     minHeight: 18,
@@ -533,14 +531,14 @@ const styles = StyleSheet.create({
   },
   statePanel: {
     minHeight: 240,
-    borderRadius: 28,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 26,
     gap: 14,
-    boxShadow: '0 16px 36px rgba(0, 0, 0, 0.10)',
+    boxShadow: brand.shadow.card,
   },
   stateCopy: {
     alignItems: 'center',
@@ -562,19 +560,19 @@ const styles = StyleSheet.create({
   },
   featureCard: {
     minHeight: 92,
-    borderRadius: 22,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 1,
     padding: 15,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    boxShadow: '0 8px 20px rgba(0, 0, 0, 0.07)',
+    boxShadow: '0 6px 16px rgba(18, 20, 15, 0.06)',
   },
   featureIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: brand.radius.round,
+    width: 44,
+    height: 44,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
@@ -598,7 +596,7 @@ const styles = StyleSheet.create({
   },
   stepRail: {
     minHeight: 46,
-    borderRadius: 18,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     borderWidth: 1,
     flexDirection: 'row',
@@ -630,7 +628,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   progressRail: {
-    borderRadius: 18,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     borderWidth: 1,
     padding: 13,
@@ -666,8 +664,8 @@ const styles = StyleSheet.create({
     borderRadius: brand.radius.round,
   },
   stepper: {
-    minHeight: 60,
-    borderRadius: 20,
+    minHeight: 64,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     borderWidth: 1,
     paddingHorizontal: 14,
@@ -702,15 +700,15 @@ const styles = StyleSheet.create({
     gap: 9,
   },
   roundControl: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: brand.radius.round,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepperValuePill: {
     minWidth: 50,
-    minHeight: 36,
+    minHeight: 40,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
     borderWidth: 1,
@@ -725,7 +723,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   filterChip: {
-    minHeight: 38,
+    minHeight: 44,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
     borderWidth: 1,
@@ -736,7 +734,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   filterChipCompact: {
-    minHeight: 34,
+    minHeight: 44,
     paddingHorizontal: 12,
   },
   filterChipText: {
@@ -748,13 +746,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     padding: 4,
-    borderRadius: 18,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
   },
   segmentedItem: {
     flex: 1,
-    minHeight: 58,
-    borderRadius: brand.radius.medium,
+    minHeight: 60,
+    borderRadius: brand.radius.small,
     borderCurve: 'continuous',
     borderWidth: 1,
     paddingHorizontal: 12,

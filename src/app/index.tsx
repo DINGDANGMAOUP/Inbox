@@ -1,22 +1,25 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { Image } from 'expo-image';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
-import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, SlideInLeft, SlideOutLeft } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BookCover } from '@/components/reader/book-cover';
 import { IconButton } from '@/components/reader/icon-button';
+import { LibraryBookRow } from '@/components/reader/library-book-row';
 import { M3FilterChip, M3Screen, M3StatePanel } from '@/components/reader/m3';
+import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brandAssets } from '@/constants/brand-assets';
@@ -24,7 +27,7 @@ import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
-import { cleanChapterTitle } from '@/lib/text-utils';
+import { authorLabel, bookProgressPercent, bookTitleLabel, hasReadingProgress, progressLabel } from '@/lib/library-book-labels';
 import { deleteBook, importBook, listBooks } from '@/lib/reader-service';
 import type { LibraryBook, ResolvedAppTheme } from '@/types/reader';
 
@@ -36,50 +39,6 @@ const libraryFilters: { value: LibraryFilter; label: string; icon: MaterialSymbo
   { value: 'unread', label: '未开始', icon: 'tray.and.arrow.down' },
 ];
 
-function authorLabel(author: string) {
-  return author === 'Local file' ? '本地文件' : author;
-}
-
-function bookTitleLabel(book: Pick<LibraryBook, 'title'>) {
-  return cleanChapterTitle(book.title, book.title || '未命名书籍');
-}
-
-function chapterLabel(title?: string | null) {
-  return cleanChapterTitle(title, '阅读中')
-    .replace(/^Part\s+(\d+)$/i, '第 $1 部分')
-    .replace(/^Chapter\s+(\d+)$/i, '第 $1 章');
-}
-
-function hasReadingProgress(book: LibraryBook) {
-  return Boolean(book.progressChapterId);
-}
-
-function bookProgressPercent(book: LibraryBook) {
-  if (!hasReadingProgress(book)) {
-    return null;
-  }
-
-  const chapterOrder = Math.max(0, book.currentChapterOrder ?? 0);
-  const chapterRatio = Math.max(0, Math.min(1, book.progressRatio ?? 0));
-  const totalChapters = Math.max(1, book.totalChapters);
-  return Math.max(0, Math.min(100, Math.round(((chapterOrder + chapterRatio) / totalChapters) * 100)));
-}
-
-function progressLabel(book: LibraryBook) {
-  if (!hasReadingProgress(book)) {
-    return '未开始';
-  }
-  const percent = bookProgressPercent(book) ?? 0;
-  if (percent === 0) {
-    return `已打开 · ${chapterLabel(book.currentChapterTitle)}`;
-  }
-  return `${percent}% · ${chapterLabel(book.currentChapterTitle)}`;
-}
-
-function statusLabel(book: LibraryBook) {
-  return hasReadingProgress(book) ? '继续' : '打开';
-}
-
 function BrandSeal() {
   return (
     <View style={styles.brandSeal}>
@@ -88,83 +47,80 @@ function BrandSeal() {
   );
 }
 
-function MetricPill({ value, label, tone }: { value: string | number; label: string; tone: 'warm' | 'cool' | 'quiet' }) {
-  const toneStyle =
-    tone === 'warm' ? styles.warmMetricPill : tone === 'cool' ? styles.coolMetricPill : styles.quietMetricPill;
+function DrawerMenuItem({
+  icon,
+  title,
+  detail,
+  onPress,
+}: {
+  icon: MaterialSymbolName;
+  title: string;
+  detail: string;
+  onPress: () => void;
+}) {
   return (
-    <View style={[styles.metricPill, toneStyle]}>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
+    <M3Pressable onPress={onPress} feedback="subtle" style={styles.drawerItem}>
+      <View style={styles.drawerItemIcon}>
+        <MaterialSymbol name={icon} color={brand.colors.copper} description={title} decorative size={18} />
+      </View>
+      <View style={styles.drawerItemCopy}>
+        <Text style={styles.drawerItemTitle}>{title}</Text>
+        <Text numberOfLines={1} style={styles.drawerItemDetail}>
+          {detail}
+        </Text>
+      </View>
+      <View style={styles.drawerItemArrow}>
+        <MaterialSymbol name="chevron.right" color={brand.colors.muted} description={`${title}菜单`} decorative size={17} />
+      </View>
+    </M3Pressable>
   );
 }
 
-function BookTile({
-  book,
-  index,
-  theme,
-  onDelete,
-}: {
-  book: LibraryBook;
-  index: number;
-  theme: ResolvedAppTheme;
-  onDelete: (book: LibraryBook) => void;
-}) {
-  const fillPercent = bookProgressPercent(book) ?? 0;
-  const themeToken = brand.appThemes[theme];
+function FeaturedBookCover({ book, theme }: { book: LibraryBook; theme: ResolvedAppTheme }) {
+  const token = brand.appThemes[theme];
+  const isDeep = theme === 'deep';
+  const titleColor = isDeep ? brand.chrome.text : brand.colors.ink;
+  const mutedColor = isDeep ? 'rgba(248, 243, 234, 0.68)' : brand.colors.muted;
 
   return (
-    <Animated.View
-      entering={FadeInDown.delay(index * motion.stagger.listItem).duration(motion.duration.medium)}
-      exiting={FadeOut.duration(motion.duration.short)}
-      layout={LinearTransition.duration(motion.duration.medium)}
-      style={styles.tile}>
-      <M3Pressable
-        onPress={() => router.push({ pathname: '/reader/[id]', params: { id: book.id } })}
-        onLongPress={() => onDelete(book)}
-        feedback="subtle"
-        style={[
-          styles.tilePressable,
-          { backgroundColor: themeToken.surfaceSolid, borderColor: themeToken.line },
-        ]}>
-        <BookCover book={book} size="small" theme={theme} />
-        <View style={styles.tileCopy}>
-          <View style={styles.tileTopRow}>
-            <Text numberOfLines={2} style={[styles.tileTitle, { color: themeToken.text }]}>
-              {bookTitleLabel(book)}
-            </Text>
-            <View style={[styles.formatPill, { backgroundColor: themeToken.surface, borderColor: themeToken.line }]}>
-              <Text style={[styles.formatPillText, { color: themeToken.accent }]}>{book.format.toUpperCase()}</Text>
-            </View>
-          </View>
-          <Text numberOfLines={1} style={[styles.tileMeta, { color: themeToken.muted }]}>
-            {authorLabel(book.author)}
-          </Text>
-          <View style={styles.tileProgressRow}>
-            <Text numberOfLines={1} style={[styles.progressText, { color: themeToken.muted }]}>
-              {progressLabel(book)}
-            </Text>
-            <View style={[styles.tileAction, { backgroundColor: themeToken.text }]}>
-              <Text style={[styles.tileStatus, { color: themeToken.surfaceSolid }]}>{statusLabel(book)}</Text>
-            </View>
-          </View>
-          <View style={[styles.progressTrack, { backgroundColor: themeToken.line }]}>
-            <View style={[styles.progressFill, { width: `${fillPercent}%`, backgroundColor: themeToken.accent }]} />
-          </View>
+    <View style={[styles.featuredBookCover, { backgroundColor: token.surfaceSolid }]}>
+      <View style={[styles.featuredBookTopBand, { backgroundColor: isDeep ? 'rgba(205, 232, 208, 0.12)' : 'rgba(205, 232, 208, 0.36)' }]} />
+      <View style={[styles.featuredBookAccentBlock, { backgroundColor: isDeep ? 'rgba(228, 222, 184, 0.18)' : 'rgba(228, 222, 184, 0.46)' }]} />
+      <View style={styles.featuredBookFormat}>
+        <Text style={styles.featuredBookFormatText}>{book.format.toUpperCase()}</Text>
+      </View>
+      <View style={[styles.featuredBookMark, { backgroundColor: isDeep ? brand.chrome.text : token.surfaceSolid }]}>
+        <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.featuredBookMarkImage} />
+      </View>
+      <View style={styles.featuredBookCoverCopy}>
+        <Text numberOfLines={1} style={[styles.featuredBookBrand, { color: mutedColor }]}>
+          墨屿阅读
+        </Text>
+        <View style={styles.featuredBookRules}>
+          <View style={[styles.featuredBookRule, { backgroundColor: mutedColor }]} />
+          <View style={[styles.featuredBookRuleShort, { backgroundColor: mutedColor }]} />
         </View>
-      </M3Pressable>
-    </Animated.View>
+        <Text numberOfLines={2} style={[styles.featuredBookTitle, { color: titleColor }]}>
+          {bookTitleLabel(book)}
+        </Text>
+        <Text numberOfLines={1} style={[styles.featuredBookAuthor, { color: mutedColor }]}>
+          {authorLabel(book.author)}
+        </Text>
+      </View>
+    </View>
   );
 }
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
   const { resolvedAppTheme } = useReaderPreferences();
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [books, setBooks] = useState<LibraryBook[]>([]);
-  const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const activeTheme = resolvedAppTheme;
   const theme = brand.appThemes[activeTheme];
@@ -173,23 +129,18 @@ export default function LibraryScreen() {
   const ambientMutedColor = isDeepTheme ? 'rgba(255, 255, 255, 0.76)' : theme.muted;
 
   const filteredBooks = useMemo(() => {
-    const trimmed = query.trim().toLowerCase();
     return books.filter((book) => {
-      const matchesQuery = !trimmed || `${bookTitleLabel(book)} ${book.author}`.toLowerCase().includes(trimmed);
       const matchesFilter = filter === 'all' || (filter === 'reading' ? hasReadingProgress(book) : !hasReadingProgress(book));
-      return matchesQuery && matchesFilter;
+      return matchesFilter;
     });
-  }, [books, filter, query]);
+  }, [books, filter]);
 
-  const featuredBook = query.trim() ? null : books.find(hasReadingProgress) ?? books[0];
-  const featuredStarted = featuredBook ? hasReadingProgress(featuredBook) : false;
+  const featuredBook = books.find(hasReadingProgress);
   const featuredProgressPercent = featuredBook ? bookProgressPercent(featuredBook) : null;
-  const shelfPreview = query.trim() ? filteredBooks.slice(0, 6) : books.slice(0, 6);
 
   const startedCount = useMemo(() => {
     return books.filter(hasReadingProgress).length;
   }, [books]);
-  const unreadCount = Math.max(0, books.length - startedCount);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -212,7 +163,6 @@ export default function LibraryScreen() {
       const imported = await importBook(db);
       await refresh();
       if (imported) {
-        setQuery('');
         setNotice(`已收进书架：${imported.title}`);
         setTimeout(() => setNotice(null), 3600);
       }
@@ -240,6 +190,14 @@ export default function LibraryScreen() {
     [db, refresh]
   );
 
+  const navigateFromDrawer = useCallback((path: '/settings' | '/about') => {
+    setMenuOpen(false);
+    router.push(path);
+  }, []);
+  const openSearch = useCallback(() => {
+    router.push('/search' as Href);
+  }, []);
+
   return (
     <M3Screen
       key={`library-screen-${activeTheme}`}
@@ -250,138 +208,69 @@ export default function LibraryScreen() {
         style={styles.scroller}
         contentInsetAdjustmentBehavior="automatic"
         refreshControl={<RefreshControl refreshing={loading && books.length > 0} onRefresh={refresh} />}
-        contentContainerStyle={styles.content}>
+        contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
         <View style={styles.topAppBar}>
           <View style={styles.brandRow}>
-            <BrandSeal />
+            <M3Pressable
+              onPress={() => setMenuOpen(true)}
+              feedback="subtle"
+              hitSlop={8}
+              accessibilityLabel="打开菜单"
+              style={[styles.brandMenuButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+              <BrandSeal />
+            </M3Pressable>
             <View style={styles.heroText}>
-              <Image source={isDeepTheme ? brandAssets.wordmarkLight : brandAssets.wordmark} contentFit="contain" transition={160} style={styles.wordmark} />
+              <Text numberOfLines={1} style={[styles.brandTitle, { color: ambientTextColor }]}>
+                墨屿
+              </Text>
+              <Text numberOfLines={1} style={[styles.brandSubtitle, { color: ambientMutedColor }]}>
+                INBOX
+              </Text>
             </View>
           </View>
-          <View style={styles.utilityRow}>
-            <IconButton
-              tone="quiet"
-              icon="settings"
-              label="设置"
-              tintColor="#F7F0E4"
-              size="icon"
-              style={styles.appBarIconButton}
-              onPress={() => router.push('/settings')}
-            />
-            <IconButton
-              tone="quiet"
-              icon="info"
-              label="关于"
-              tintColor="#F7F0E4"
-              size="icon"
-              style={styles.appBarIconButton}
-              onPress={() => router.push('/about')}
-            />
-          </View>
+          <IconButton
+            icon="magnifyingglass"
+            label="搜索书架"
+            tone="quiet"
+            tintColor={theme.text}
+            size="icon"
+            style={[styles.searchIconButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}
+            onPress={openSearch}
+          />
         </View>
 
         <View style={styles.libraryHero}>
+          <Image source={appThemeAssets[activeTheme].materialBoard} contentFit="cover" transition={220} style={styles.heroMaterialBoard} />
+          <View style={styles.heroTint} />
           <View style={styles.libraryHeroTop}>
             <View style={styles.heroCopyBlock}>
               <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
-              <Text style={styles.heroTitle}>安静地读{'\n'}利落地收</Text>
+              <Text style={styles.heroTitle}>私人书架{'\n'}安静长读</Text>
             </View>
-            <View style={styles.metricGrid}>
-              <MetricPill value={books.length} label="藏书" tone="warm" />
-              <MetricPill value={startedCount} label="在读" tone="cool" />
-              <MetricPill value={unreadCount} label="未开" tone="quiet" />
-            </View>
-          </View>
-          <View style={styles.commandRow}>
-            <View style={styles.searchBar}>
-              <MaterialSymbol name="magnifyingglass" color="rgba(245, 239, 228, 0.62)" description="搜索书架" size={18} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="搜索书名或作者"
-                placeholderTextColor="rgba(245, 239, 228, 0.48)"
-                autoCapitalize="none"
-                style={styles.searchInput}
-              />
-            </View>
-            <IconButton
-              tone="filled"
-              icon="plus"
-              label={importing ? '导入中' : '导入'}
-              size="icon"
-              disabled={importing}
-              tintColor="#161711"
-              onPress={handleImport}
-              style={styles.heroImportButton}
-            />
-          </View>
-          <View style={styles.metricGrid}>
-            {libraryFilters.map((item) => {
-              const active = filter === item.value;
-              const count = item.value === 'all' ? books.length : item.value === 'reading' ? startedCount : unreadCount;
-              return (
-                <M3FilterChip
-                  key={item.value}
-                  theme={{
-                    ...theme,
-                    surface: 'rgba(255, 255, 255, 0.10)',
-                    surfaceContainer: 'rgba(255, 255, 255, 0.10)',
-                    primaryContainer: '#E7D9B7',
-                    onPrimaryContainer: '#1B1710',
-                    text: '#F8F1E6',
-                    muted: 'rgba(248, 241, 230, 0.62)',
-                    accent: '#E7D9B7',
-                    line: 'rgba(255, 255, 255, 0.14)',
-                  }}
-                  selected={active}
-                  label={item.label}
-                  count={count}
-                  icon={item.icon}
-                  onPress={() => setFilter(item.value)}
-                />
-              );
-            })}
           </View>
         </View>
 
       {notice && (
-        <Animated.View entering={FadeInDown.duration(motion.duration.medium)} exiting={FadeOut.duration(motion.duration.short)} style={styles.notice}>
+        <Animated.View entering={m3Motion.fadeDown()} exiting={m3Motion.fadeShortOut()} style={styles.notice}>
           <Text numberOfLines={2} style={styles.noticeText}>
             {notice}
           </Text>
         </Animated.View>
       )}
 
-      {!!query.trim() && (
-        <Animated.View
-          entering={FadeInDown.duration(motion.duration.short)}
-          exiting={FadeOut.duration(motion.duration.short)}
-          style={[styles.searchContext, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-          <Text style={styles.searchContextText}>正在筛选书架</Text>
-          <M3Pressable onPress={() => setQuery('')} hitSlop={8} feedback="subtle">
-            <Text style={styles.clearSearchText}>清除</Text>
-          </M3Pressable>
-        </Animated.View>
-      )}
-
       {featuredBook && (
-        <Animated.View entering={FadeInDown.duration(motion.duration.medium)}>
+        <Animated.View entering={m3Motion.fadeDown()}>
           <M3Pressable
             onPress={() => router.push({ pathname: '/reader/[id]', params: { id: featuredBook.id } })}
             feedback="subtle"
             style={[
               styles.featured,
               { backgroundColor: theme.surfaceSolid, borderColor: theme.line },
-            ]}>
-            <View style={styles.featuredCoverColumn}>
-              <BookCover book={featuredBook} size="hero" theme={activeTheme} />
-            </View>
+              ]}>
+            <FeaturedBookCover book={featuredBook} theme={activeTheme} />
             <View style={styles.featuredCopy}>
               <View style={styles.featuredHeaderRow}>
-                <Text style={styles.sectionKicker}>{featuredStarted ? '继续阅读' : '最近导入'}</Text>
-                <View style={[styles.featuredStatusChip, { backgroundColor: theme.text }]}>
-                  <Text style={[styles.featuredStatusText, { color: theme.surfaceSolid }]}>{statusLabel(featuredBook)}</Text>
-                </View>
+                <Text style={styles.sectionKicker}>继续阅读</Text>
               </View>
               <Text numberOfLines={2} style={[styles.featuredTitle, { color: theme.text }]}>
                 {bookTitleLabel(featuredBook)}
@@ -400,7 +289,7 @@ export default function LibraryScreen() {
                 </View>
                 <View style={styles.readButton}>
                   <Text style={styles.readButtonText}>阅读</Text>
-                  <MaterialSymbol name="chevron.right" color="#F7F0E4" description="开始阅读" size={17} />
+                  <MaterialSymbol name="chevron.right" color={brand.chrome.text} description="开始阅读" decorative size={17} />
                 </View>
               </View>
             </View>
@@ -408,31 +297,27 @@ export default function LibraryScreen() {
         </Animated.View>
       )}
 
-      {shelfPreview.length > 1 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.coverRail}>
-          {shelfPreview.map((book, index) => (
-            <Animated.View key={`cover-${book.id}`} entering={FadeInDown.delay(index * 36).duration(motion.duration.medium)}>
-              <M3Pressable
-                onPress={() => router.push({ pathname: '/reader/[id]', params: { id: book.id } })}
-                onLongPress={() => handleDelete(book)}
-                feedback="subtle"
-                style={styles.coverRailItem}>
-                <BookCover book={book} size="small" theme={activeTheme} />
-              </M3Pressable>
-            </Animated.View>
-          ))}
-        </ScrollView>
-      )}
-
       <View style={styles.sectionHeader}>
         <View>
-          <Text style={styles.sectionKickerDark}>书架</Text>
-          <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>{filter === 'reading' ? '继续阅读' : filter === 'unread' ? '未开始' : '全部书籍'}</Text>
+          <Text style={styles.sectionKickerDark}>LIBRARY</Text>
+          <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>书架</Text>
         </View>
         <Text style={[styles.count, { color: ambientMutedColor }]}>{filteredBooks.length} 本书</Text>
+      </View>
+      <View style={styles.filterRow}>
+        {libraryFilters.map((item) => {
+          const active = filter === item.value;
+          return (
+            <M3FilterChip
+              key={item.value}
+              theme={theme}
+              selected={active}
+              label={item.label}
+              icon={item.icon}
+              onPress={() => setFilter(item.value)}
+            />
+          );
+        })}
       </View>
 
       {loading && books.length === 0 ? (
@@ -440,33 +325,79 @@ export default function LibraryScreen() {
       ) : filteredBooks.length === 0 ? (
         <M3StatePanel
           theme={theme}
-          title={query ? '没有匹配的书' : '导入第一本书'}
+          title={filter === 'all' ? '导入第一本书' : '这里还没有书'}
           body="支持 EPUB 与 TXT。"
           artwork={<BrandSeal />}
           order={1}>
-          {!query.trim() && (
+          {filter === 'all' && (
             <View style={styles.emptyCapabilityRow}>
               <EmptyCapability theme={activeTheme} label="EPUB" />
               <EmptyCapability theme={activeTheme} label="TXT" />
             </View>
           )}
-          <IconButton
-            icon="tray.and.arrow.down"
-            label={importing ? '导入中' : '选择文件'}
-            tintColor={theme.onPrimaryContainer}
-            style={{ backgroundColor: theme.primaryContainer, borderColor: theme.line }}
-            disabled={importing}
-            onPress={handleImport}
-          />
         </M3StatePanel>
       ) : (
         <View style={styles.shelfList}>
           {filteredBooks.map((book, index) => (
-            <BookTile key={book.id} book={book} index={index} theme={activeTheme} onDelete={handleDelete} />
+            <LibraryBookRow key={book.id} book={book} index={index} theme={activeTheme} onDelete={handleDelete} />
           ))}
         </View>
       )}
       </ScrollView>
+      <M3Pressable
+        onPress={handleImport}
+        disabled={importing}
+        feedback="strong"
+        accessibilityLabel={importing ? '导入中' : '导入书籍'}
+        style={[styles.floatingImportButton, { bottom: Math.max(10, insets.bottom + 6) }]}>
+        <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description={importing ? '导入中' : '导入书籍'} decorative size={19} />
+      </M3Pressable>
+      {menuOpen && (
+        <Animated.View pointerEvents="box-none" style={styles.drawerLayer}>
+          <Animated.View entering={FadeIn.duration(motion.duration.short)} exiting={FadeOut.duration(motion.duration.short)} style={styles.drawerBackdrop}>
+            <Pressable accessibilityRole="button" accessibilityLabel="关闭菜单" onPress={() => setMenuOpen(false)} style={StyleSheet.absoluteFill} />
+          </Animated.View>
+          <Animated.View
+            entering={SlideInLeft.duration(motion.duration.medium)}
+            exiting={SlideOutLeft.duration(motion.duration.short)}
+            style={[
+              styles.drawerPanel,
+              {
+                paddingTop: Math.max(24, insets.top + 14),
+                backgroundColor: brand.colors.paper,
+                borderColor: theme.line,
+              },
+            ]}>
+            <View style={styles.drawerHeroCard}>
+              <View style={styles.drawerBrand}>
+                <BrandSeal />
+                <View style={styles.drawerBrandCopy}>
+                  <Image source={brandAssets.wordmark} contentFit="contain" transition={160} style={styles.drawerWordmark} />
+                  <Text style={styles.drawerSubtitle}>私人书架</Text>
+                </View>
+              </View>
+              <View style={styles.drawerStats}>
+                <View style={[styles.drawerStatPill, styles.drawerStatPillCool]}>
+                  <Text style={styles.drawerStatValue}>{books.length}</Text>
+                  <Text style={styles.drawerStatLabel}>藏书</Text>
+                </View>
+                <View style={[styles.drawerStatPill, styles.drawerStatPillWarm]}>
+                  <Text style={styles.drawerStatValue}>{startedCount}</Text>
+                  <Text style={styles.drawerStatLabel}>在读</Text>
+                </View>
+              </View>
+            </View>
+            <View style={styles.drawerMenu}>
+              <Text style={styles.drawerSectionLabel}>菜单</Text>
+              <DrawerMenuItem icon="settings" title="设置" detail="阅读样式与主题" onPress={() => navigateFromDrawer('/settings')} />
+              <DrawerMenuItem icon="info" title="关于" detail="版本与应用信息" onPress={() => navigateFromDrawer('/about')} />
+            </View>
+            <View style={styles.drawerFooter}>
+              <Text style={styles.drawerFooterText}>本地阅读 · 私密保存</Text>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      )}
     </M3Screen>
   );
 }
@@ -486,10 +417,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   content: {
-    paddingHorizontal: 18,
-    paddingTop: 42,
-    paddingBottom: 118,
-    gap: 18,
+    paddingHorizontal: 20,
+    paddingTop: 44,
+    paddingBottom: 204,
+    gap: 22,
+  },
+  contentWide: {
+    width: '100%',
+    maxWidth: 820,
+    alignSelf: 'center',
   },
   topAppBar: {
     flexDirection: 'row',
@@ -502,61 +438,94 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 11,
     minWidth: 0,
   },
+  brandMenuButton: {
+    width: 50,
+    height: 50,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.06)',
+  },
+  searchIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.08)',
+  },
   brandSeal: {
-    width: 46,
-    height: 46,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: '#F3E9D2',
-    boxShadow: '0 12px 28px rgba(0, 0, 0, 0.20)',
+    backgroundColor: brand.colors.paper,
   },
   brandSealImage: {
-    width: '100%',
-    height: '100%',
+    position: 'absolute',
+    left: -31,
+    top: -30,
+    width: 96,
+    height: 96,
   },
   heroText: {
     flex: 1,
-    gap: 2,
+    gap: 0,
     minWidth: 0,
   },
+  brandTitle: {
+    fontSize: 22,
+    lineHeight: 25,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  brandSubtitle: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
   eyebrow: {
-    color: '#D8C59A',
+    color: brand.chrome.accent,
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
-  wordmark: {
-    width: 132,
-    height: 46,
-    marginLeft: -4,
-  },
-  utilityRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  appBarIconButton: {
-    width: 44,
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 0,
-    backgroundColor: '#151611',
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    boxShadow: '0 12px 26px rgba(0, 0, 0, 0.16)',
-  },
   libraryHero: {
-    borderRadius: 30,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    backgroundColor: '#151611',
-    padding: 18,
-    gap: 18,
+    borderColor: brand.chrome.border,
+    backgroundColor: brand.chrome.surface,
+    padding: 22,
+    minHeight: 204,
+    justifyContent: 'flex-end',
     overflow: 'hidden',
-    boxShadow: '0 24px 54px rgba(0, 0, 0, 0.28)',
+    boxShadow: '0 22px 42px rgba(18, 20, 15, 0.18)',
+  },
+  heroMaterialBoard: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    opacity: 0.14,
+  },
+  heroTint: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(11, 14, 11, 0.88)',
   },
   libraryHeroTop: {
     gap: 16,
@@ -565,87 +534,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroTitle: {
-    maxWidth: 260,
-    color: '#F7F0E4',
-    fontSize: 31,
-    lineHeight: 36,
+    maxWidth: 292,
+    color: brand.chrome.text,
+    fontSize: 38,
+    lineHeight: 42,
     fontWeight: '900',
     letterSpacing: 0,
-  },
-  metricGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  metricPill: {
-    minWidth: 74,
-    minHeight: 58,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    justifyContent: 'center',
-    gap: 1,
-  },
-  warmMetricPill: {
-    backgroundColor: '#E7D9B7',
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  coolMetricPill: {
-    backgroundColor: '#BFD6C3',
-    borderColor: 'rgba(255, 255, 255, 0.16)',
-  },
-  quietMetricPill: {
-    backgroundColor: '#F0ECE2',
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  metricValue: {
-    color: '#14130F',
-    fontSize: 20,
-    lineHeight: 23,
-    fontWeight: '900',
-    letterSpacing: 0,
-    fontVariant: ['tabular-nums'],
-  },
-  metricLabel: {
-    color: 'rgba(20, 19, 15, 0.68)',
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  commandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  searchBar: {
-    flex: 1,
-    minHeight: 52,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(255, 255, 255, 0.075)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  searchInput: {
-    flex: 1,
-    minHeight: 46,
-    color: '#F7F0E4',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  heroImportButton: {
-    width: 52,
-    minWidth: 52,
-    minHeight: 52,
-    paddingHorizontal: 0,
-    backgroundColor: '#E7D9B7',
-    borderColor: '#E7D9B7',
   },
   notice: {
     borderRadius: brand.radius.large,
@@ -663,54 +557,119 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0,
   },
-  searchContext: {
-    minHeight: 44,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    backgroundColor: '#151611',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    paddingHorizontal: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  searchContextText: {
-    color: '#F7F0E4',
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  clearSearchText: {
-    color: '#E7D9B7',
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
   featured: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    borderRadius: 26,
+    gap: 18,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    overflow: 'visible',
+    minHeight: 188,
+    borderWidth: 1,
+    padding: 14,
+    boxShadow: brand.shadow.card,
+  },
+  featuredBookCover: {
+    width: 112,
+    height: 158,
+    flexShrink: 0,
+    alignSelf: 'center',
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    minHeight: 198,
-    borderWidth: 1,
-    padding: 12,
-    boxShadow: '0 18px 40px rgba(0, 0, 0, 0.16)',
+    boxShadow: '0 10px 22px rgba(18, 20, 15, 0.10)',
   },
-  featuredCoverColumn: {
-    width: 126,
-    alignSelf: 'stretch',
-    flexShrink: 0,
+  featuredBookTopBand: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    height: 48,
+  },
+  featuredBookAccentBlock: {
+    position: 'absolute',
+    left: 0,
+    bottom: 28,
+    width: 46,
+    height: 42,
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
+    borderCurve: 'continuous',
+  },
+  featuredBookFormat: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    minHeight: 30,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    backgroundColor: brand.chrome.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 22,
+    paddingHorizontal: 10,
+  },
+  featuredBookFormatText: {
+    color: brand.chrome.accentText,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  featuredBookMark: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 13,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(10, 11, 9, 0.08)',
-    padding: 9,
+    padding: 3,
     overflow: 'hidden',
+    boxShadow: '0 8px 18px rgba(21, 22, 17, 0.14)',
+  },
+  featuredBookMarkImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
+  },
+  featuredBookCoverCopy: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 13,
+    gap: 5,
+  },
+  featuredBookBrand: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  featuredBookTitle: {
+    fontSize: 21,
+    lineHeight: 24,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  featuredBookRules: {
+    gap: 4,
+    opacity: 0.22,
+    paddingVertical: 2,
+  },
+  featuredBookRule: {
+    width: '82%',
+    height: 4,
+    borderRadius: brand.radius.round,
+  },
+  featuredBookRuleShort: {
+    width: '58%',
+    height: 4,
+    borderRadius: brand.radius.round,
+  },
+  featuredBookAuthor: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+    letterSpacing: 0,
   },
   featuredCopy: {
     flex: 1,
@@ -725,35 +684,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
-  featuredStatusChip: {
-    minHeight: 28,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  featuredStatusText: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
   sectionKicker: {
-    color: '#7A6B48',
+    color: brand.colors.copper,
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
   sectionKickerDark: {
-    color: '#7A6B48',
+    color: brand.colors.copper,
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
   },
   featuredTitle: {
     color: brand.colors.ink,
-    fontSize: 23,
-    lineHeight: 28,
+    fontSize: 25,
+    lineHeight: 30,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -781,10 +727,10 @@ const styles = StyleSheet.create({
   featuredProgressFill: {
     height: '100%',
     borderRadius: brand.radius.round,
-    backgroundColor: '#BFD6C3',
+    backgroundColor: brand.colors.tertiaryContainer,
   },
   readButton: {
-    backgroundColor: '#151611',
+    backgroundColor: brand.chrome.surface,
     borderRadius: brand.radius.round,
     minHeight: 44,
     flexDirection: 'row',
@@ -794,7 +740,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   readButtonText: {
-    color: '#F7F0E4',
+    color: brand.chrome.text,
     fontWeight: '900',
     letterSpacing: 0,
   },
@@ -821,101 +767,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: -12,
+  },
   shelfList: {
-    gap: 10,
-  },
-  tile: {
-    width: '100%',
-  },
-  tilePressable: {
-    minHeight: 118,
-    borderRadius: 22,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    padding: 12,
-    boxShadow: '0 9px 20px rgba(0, 0, 0, 0.07)',
-  },
-  tileCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 7,
-  },
-  tileTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  tileTitle: {
-    color: brand.colors.ink,
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  tileMeta: {
-    color: brand.colors.muted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  formatPill: {
-    minWidth: 42,
-    borderRadius: brand.radius.round,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    alignItems: 'center',
-  },
-  formatPillText: {
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  tileProgressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  tileStatus: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  tileAction: {
-    minHeight: 28,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  progressTrack: {
-    height: 5,
-    borderRadius: brand.radius.round,
-    backgroundColor: 'rgba(21, 22, 17, 0.12)',
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: brand.radius.round,
-    backgroundColor: '#BFD6C3',
-  },
-  progressText: {
-    color: brand.colors.muted,
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  coverRail: {
     gap: 12,
-    paddingRight: 18,
-  },
-  coverRailItem: {
-    width: 72,
   },
   emptyCapabilityRow: {
     flexDirection: 'row',
@@ -935,6 +794,197 @@ const styles = StyleSheet.create({
   emptyCapabilityText: {
     fontSize: 12,
     fontWeight: '900',
+    letterSpacing: 0,
+  },
+  floatingImportButton: {
+    position: 'absolute',
+    right: 8,
+    zIndex: 20,
+    width: 46,
+    height: 46,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: brand.chrome.accent,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.42)',
+    boxShadow: '0 16px 30px rgba(18, 20, 15, 0.20)',
+  },
+  drawerLayer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 40,
+  },
+  drawerBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(7, 9, 7, 0.46)',
+  },
+  drawerPanel: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '80%',
+    maxWidth: 320,
+    borderTopRightRadius: brand.radius.extraLarge,
+    borderBottomRightRadius: brand.radius.extraLarge,
+    borderCurve: 'continuous',
+    borderRightWidth: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    gap: 16,
+    boxShadow: '14px 0 28px rgba(7, 9, 7, 0.16)',
+  },
+  drawerHeroCard: {
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(18, 20, 15, 0.08)',
+    backgroundColor: 'rgba(255, 252, 244, 0.72)',
+    padding: 14,
+    gap: 16,
+    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.06)',
+  },
+  drawerBrand: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  drawerBrandCopy: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  drawerWordmark: {
+    width: 126,
+    height: 42,
+    marginLeft: -4,
+  },
+  drawerSubtitle: {
+    color: brand.colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  drawerStats: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  drawerStatPill: {
+    flex: 1,
+    minHeight: 62,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    justifyContent: 'center',
+  },
+  drawerStatPillCool: {
+    backgroundColor: '#DCEEDF',
+  },
+  drawerStatPillWarm: {
+    backgroundColor: '#EEE9BD',
+  },
+  drawerStatValue: {
+    color: brand.colors.ink,
+    fontSize: 25,
+    lineHeight: 28,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  drawerStatLabel: {
+    color: brand.colors.muted,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  drawerMenu: {
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: 'rgba(18, 20, 15, 0.08)',
+    backgroundColor: 'rgba(255, 252, 244, 0.78)',
+    padding: 8,
+    gap: 6,
+    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.05)',
+  },
+  drawerSectionLabel: {
+    color: brand.colors.copper,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+    paddingHorizontal: 8,
+    paddingTop: 2,
+    paddingBottom: 4,
+  },
+  drawerItem: {
+    minHeight: 58,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    backgroundColor: 'rgba(248, 245, 236, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(18, 20, 15, 0.07)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+  },
+  drawerItemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: brand.radius.small,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DCEEDF',
+  },
+  drawerItemCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  drawerItemTitle: {
+    color: brand.colors.ink,
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  drawerItemDetail: {
+    color: brand.colors.muted,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  drawerItemArrow: {
+    width: 28,
+    height: 28,
+    borderRadius: brand.radius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(18, 20, 15, 0.04)',
+  },
+  drawerFooter: {
+    marginTop: 'auto',
+    minHeight: 40,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(18, 20, 15, 0.04)',
+  },
+  drawerFooterText: {
+    color: brand.colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
     letterSpacing: 0,
   },
 });

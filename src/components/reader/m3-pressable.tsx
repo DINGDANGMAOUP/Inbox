@@ -2,6 +2,7 @@ import { StyleSheet, Pressable, type PressableProps, type PressableStateCallback
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { motion } from '@/constants/motion';
+import { m3Easing } from '@/components/reader/motion-presets';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -30,9 +31,10 @@ function feedbackScale(feedback: M3PressableFeedback) {
 export function M3Pressable({
   captureTouches = false,
   feedback = 'standard',
-  stateLayerColor = 'rgba(231, 217, 183, 0.18)',
+  stateLayerColor = 'rgba(205, 232, 208, 0.18)',
   style,
   disabled,
+  accessibilityRole = 'button',
   onStartShouldSetResponderCapture,
   onPressIn,
   onPressOut,
@@ -65,12 +67,13 @@ export function M3Pressable({
   return (
     <AnimatedPressable
       disabled={disabled}
+      accessibilityRole={accessibilityRole}
       onPressIn={(event) => {
-        pressed.set(withTiming(1, { duration: reduceMotion ? 0 : motion.duration.pressIn }));
+        pressed.set(withTiming(1, { duration: reduceMotion ? 0 : motion.duration.pressIn, easing: m3Easing.standard }));
         onPressIn?.(event);
       }}
       onPressOut={(event) => {
-        pressed.set(withTiming(0, { duration: reduceMotion ? 0 : motion.duration.pressOut }));
+        pressed.set(withTiming(0, { duration: reduceMotion ? 0 : motion.duration.pressOut, easing: m3Easing.emphasizedDecelerate }));
         onPressOut?.(event);
       }}
       style={[style, animatedStyle]}

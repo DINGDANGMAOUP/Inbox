@@ -1,10 +1,10 @@
 import { Image } from 'expo-image';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
-import { motion } from '@/constants/motion';
+import { m3Motion } from '@/components/reader/motion-presets';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { cleanChapterTitle } from '@/lib/text-utils';
 import type { Book, ResolvedAppTheme } from '@/types/reader';
@@ -31,23 +31,44 @@ export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
   const themeToken = brand.appThemes[coverTheme];
   const compact = size === 'small';
   const displayTitle = cleanChapterTitle(book.title, book.title || '未命名书籍');
-  const textColor = coverTheme === 'deep' ? brand.colors.white : '#151611';
+  const textColor = coverTheme === 'deep' ? brand.colors.white : brand.colors.ink;
   const quietTextColor = coverTheme === 'deep' ? 'rgba(255, 255, 255, 0.74)' : '#756D60';
   const titleStyle = size === 'hero' ? styles.heroTitle : size === 'small' ? styles.smallTitle : styles.gridTitle;
   const copyStyle = size === 'hero' ? styles.heroCopy : size === 'small' ? styles.smallCopy : styles.gridCopy;
 
   return (
     <Animated.View
-      entering={FadeIn.duration(motion.duration.short)}
-      style={[styles.cover, styles[size], { backgroundColor: themeToken.background, borderColor: themeToken.line }]}>
-      <Image source={appThemeAssets[coverTheme].cover} contentFit="cover" transition={160} style={StyleSheet.absoluteFill} />
-      <View style={[styles.scrim, coverTheme === 'deep' && styles.deepScrim]} />
+      entering={m3Motion.fadeShortIn()}
+      style={[
+        styles.cover,
+        styles[size],
+        compact && styles.smallCover,
+        { backgroundColor: compact ? themeToken.surfaceSolid : themeToken.background, borderColor: themeToken.line },
+      ]}>
+      {compact ? (
+        <>
+          <View style={[styles.smallTopBand, { backgroundColor: coverTheme === 'deep' ? 'rgba(205, 232, 208, 0.13)' : 'rgba(205, 232, 208, 0.34)' }]} />
+          <View style={[styles.smallAccentBlock, { backgroundColor: coverTheme === 'deep' ? 'rgba(228, 222, 184, 0.18)' : 'rgba(228, 222, 184, 0.44)' }]} />
+          <View style={styles.smallRuleGroup}>
+            <View style={[styles.smallRule, { backgroundColor: quietTextColor }]} />
+            <View style={[styles.smallRuleShort, { backgroundColor: quietTextColor }]} />
+            <View style={[styles.smallRuleTiny, { backgroundColor: quietTextColor }]} />
+          </View>
+        </>
+      ) : (
+        <>
+          <Image source={appThemeAssets[coverTheme].cover} contentFit="cover" transition={160} style={StyleSheet.absoluteFill} />
+          <View style={[styles.scrim, coverTheme === 'deep' && styles.deepScrim]} />
+        </>
+      )}
       <View style={[styles.formatChip, compact && styles.smallFormatChip]}>
         <Text style={[styles.format, compact && styles.smallFormat]}>{book.format.toUpperCase()}</Text>
       </View>
-      <View style={[styles.islandMark, compact && styles.smallIslandMark, { backgroundColor: coverTheme === 'deep' ? '#F7F0E4' : themeToken.surfaceSolid }]}>
-        <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.islandMarkImage} />
-      </View>
+      {!compact && (
+        <View style={[styles.islandMark, { backgroundColor: coverTheme === 'deep' ? brand.chrome.text : themeToken.surfaceSolid }]}>
+          <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.islandMarkImage} />
+        </View>
+      )}
       {!compact && (
         <View style={[styles.copy, copyStyle]}>
           <Text style={[styles.brandText, { color: quietTextColor }]}>墨屿阅读</Text>
@@ -81,8 +102,52 @@ const styles = StyleSheet.create({
     aspectRatio: 0.68,
   },
   small: {
-    width: 72,
-    height: 104,
+    width: 68,
+    height: 96,
+  },
+  smallCover: {
+    borderRadius: brand.radius.small,
+    boxShadow: '0 6px 14px rgba(18, 20, 15, 0.08)',
+  },
+  smallTopBand: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    height: 30,
+  },
+  smallAccentBlock: {
+    position: 'absolute',
+    left: 0,
+    bottom: 18,
+    width: 28,
+    height: 26,
+    borderTopRightRadius: brand.radius.small,
+    borderBottomRightRadius: brand.radius.small,
+    borderCurve: 'continuous',
+  },
+  smallRuleGroup: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 14,
+    gap: 4,
+    opacity: 0.22,
+  },
+  smallRule: {
+    width: '82%',
+    height: 3,
+    borderRadius: brand.radius.round,
+  },
+  smallRuleShort: {
+    width: '58%',
+    height: 3,
+    borderRadius: brand.radius.round,
+  },
+  smallRuleTiny: {
+    width: '40%',
+    height: 3,
+    borderRadius: brand.radius.round,
   },
   scrim: {
     position: 'absolute',
@@ -105,7 +170,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E7D9B7',
+    backgroundColor: brand.chrome.accent,
   },
   smallFormatChip: {
     left: 9,
@@ -119,18 +184,10 @@ const styles = StyleSheet.create({
     top: 14,
     width: 40,
     height: 40,
-    borderRadius: 14,
+    borderRadius: brand.radius.small,
     overflow: 'hidden',
     padding: 3,
-    boxShadow: '0 7px 18px rgba(29, 27, 32, 0.16)',
-  },
-  smallIslandMark: {
-    right: 9,
-    top: 39,
-    width: 27,
-    height: 27,
-    borderRadius: 10,
-    padding: 2,
+    boxShadow: '0 7px 16px rgba(18, 20, 15, 0.12)',
   },
   islandMarkImage: {
     width: '100%',
@@ -144,7 +201,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   format: {
-    color: '#171811',
+    color: brand.chrome.accentText,
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0,

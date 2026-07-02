@@ -1,10 +1,13 @@
-import { router } from 'expo-router';
 import { Image } from 'expo-image';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
+import { useCallback, useEffect } from 'react';
+import { BackHandler, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { IconButton } from '@/components/reader/icon-button';
-import { M3FeatureCard, M3InfoRow, M3Screen, M3Section, M3TopAppBar } from '@/components/reader/m3';
+import { M3InfoRow, M3Screen, M3Section, M3TopAppBar } from '@/components/reader/m3';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
+import { m3Motion } from '@/components/reader/motion-presets';
+import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
@@ -14,45 +17,54 @@ import { getInstalledAppVersion, getUpdateSourceInfo } from '@/lib/app-update-se
 
 export default function AboutScreen() {
   const { resolvedAppTheme } = useReaderPreferences();
+  const { width } = useWindowDimensions();
+  const { closeRoute, routeStyle } = useRouteSlideTransition(width);
   const theme = brand.appThemes[resolvedAppTheme];
   const installedVersion = getInstalledAppVersion();
   const updateSource = getUpdateSourceInfo();
   const isDeepTheme = resolvedAppTheme === 'deep';
-  const chromeTheme = {
+  const headerTheme = {
     ...theme,
-    surface: '#151611',
-    surfaceSolid: '#151611',
-    surfaceContainer: 'rgba(255, 255, 255, 0.08)',
-    surfaceContainerHigh: 'rgba(255, 255, 255, 0.12)',
-    text: '#F7F0E4',
-    muted: 'rgba(247, 240, 228, 0.62)',
-    accent: '#E7D9B7',
-    accentText: '#171811',
-    primaryContainer: '#E7D9B7',
-    onPrimaryContainer: '#171811',
-    line: 'rgba(255, 255, 255, 0.12)',
+    surface: theme.surfaceSolid,
+    surfaceSolid: theme.surfaceSolid,
+    surfaceContainer: theme.surfaceContainer,
+    surfaceContainerHigh: theme.surfaceContainerHigh,
+    primaryContainer: theme.primaryContainer,
+    onPrimaryContainer: theme.onPrimaryContainer,
   };
+  const handleBack = useCallback(() => {
+    closeRoute();
+  }, [closeRoute]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBack();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [handleBack]);
 
   return (
-    <M3Screen
-      key={`about-screen-${resolvedAppTheme}`}
-      theme={theme}
-      backgroundSource={appThemeAssets[resolvedAppTheme].background}
-      overlayColor={isDeepTheme ? 'rgba(8, 9, 6, 0.36)' : 'rgba(247, 243, 234, 0.78)'}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.content}>
+    <Animated.View style={[styles.routeShell, routeStyle]}>
+      <M3Screen
+        key={`about-screen-${resolvedAppTheme}`}
+        theme={theme}
+        backgroundSource={appThemeAssets[resolvedAppTheme].background}
+        overlayColor={isDeepTheme ? 'rgba(8, 9, 6, 0.36)' : 'rgba(247, 243, 234, 0.78)'}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
         <M3TopAppBar
-          theme={chromeTheme}
-          title="关于墨屿"
-          subtitle="Private Library"
+          theme={headerTheme}
+          title="关于"
+          subtitle="墨屿 Inbox"
           leading={
             <IconButton
               icon="chevron.left"
               label="返回"
               tone="quiet"
-              tintColor="#F7F0E4"
+              tintColor={theme.text}
               size="icon"
-              style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)', borderColor: 'rgba(255, 255, 255, 0.14)' }}
-              onPress={() => router.back()}
+              style={{ backgroundColor: theme.surfaceContainer, borderColor: theme.line }}
+              onPress={handleBack}
             />
           }
           trailing={
@@ -63,22 +75,34 @@ export default function AboutScreen() {
         />
 
         <Animated.View
-          entering={FadeInDown.delay(motion.stagger.section).duration(motion.duration.medium)}
-          layout={LinearTransition.duration(motion.duration.medium)}
+          entering={m3Motion.fadeDown(motion.stagger.section)}
+          layout={m3Motion.layoutMedium()}
           style={styles.hero}>
-          <Image source={brandAssets.logoBoard} contentFit="contain" style={styles.logoBoard} />
-          <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
-          <Text style={styles.title}>墨屿</Text>
-          <Text style={styles.subtitle}>安静、离线、适合长读的本地书库。</Text>
+          <View style={styles.heroBrandRow}>
+            <View style={styles.heroLogoSeal}>
+              <Image source={brandAssets.logoMark} contentFit="cover" style={styles.heroLogo} />
+            </View>
+            <View style={styles.heroCopy}>
+              <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
+              <Text style={styles.title}>墨屿</Text>
+              <Text style={styles.subtitle}>安静、离线、适合长读的本地书库。</Text>
+            </View>
+          </View>
+          <View style={styles.heroDivider} />
+          <View style={styles.heroPills}>
+            <AboutPill icon="bookmark" label="本地书库" />
+            <AboutPill icon="textformat.size" label="长读友好" />
+            <AboutPill icon="tray.and.arrow.down" label="EPUB / TXT" />
+          </View>
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(motion.stagger.section * 2).duration(motion.duration.medium)} style={styles.promiseGrid}>
-          <M3FeatureCard theme={theme} icon="bookmark" title="本地书库" body="导入 EPUB 与 TXT。" />
-          <M3FeatureCard theme={theme} icon="textformat.size" title="长读友好" body="滚动、翻页和阅读主题。" />
-          <M3FeatureCard theme={theme} icon="check.circle" title="轻量" body="没有账号和书城。" />
+        <Animated.View entering={m3Motion.fadeDown(motion.stagger.section * 2)} style={styles.promiseGrid}>
+          <AboutPrinciple theme={theme} icon="bookmark" title="本地优先" body="书籍与阅读记录保存在这台设备。" />
+          <AboutPrinciple theme={theme} icon="textformat.size" title="长读友好" body="保留主题、字号、行距和翻页偏好。" />
+          <AboutPrinciple theme={theme} icon="check.circle" title="轻量安静" body="不做账号系统，也不把书城放进阅读动线。" />
         </Animated.View>
 
-        <M3Section theme={theme} title="产品信息" order={3}>
+        <M3Section theme={theme} title="产品信息" order={3} contentStyle={styles.infoSectionSurface}>
           <M3InfoRow theme={theme} title="产品名" value="墨屿" icon="info" />
           <M3InfoRow theme={theme} title="英文名" value="Inbox" icon="info" />
           <M3InfoRow theme={theme} title="阶段" value="开发内测" icon="check.circle" />
@@ -88,13 +112,47 @@ export default function AboutScreen() {
           <M3InfoRow theme={theme} title="更新渠道" value={updateSource.label} icon="download" />
         </M3Section>
 
-        <M3Section theme={theme} title="数据" order={4}>
+        <M3Section theme={theme} title="数据" order={4} contentStyle={styles.infoSectionSurface}>
           <M3InfoRow theme={theme} title="书籍" value="应用文档目录" icon="bookmark" />
           <M3InfoRow theme={theme} title="阅读记录" value="本机数据库" icon="check.circle" />
           <M3InfoRow theme={theme} title="账号" value="无" icon="info" />
         </M3Section>
       </ScrollView>
-    </M3Screen>
+      </M3Screen>
+    </Animated.View>
+  );
+}
+
+function AboutPill({ icon, label }: { icon: MaterialSymbolName; label: string }) {
+  return (
+    <View style={styles.aboutPill}>
+      <MaterialSymbol name={icon} color={brand.colors.copper} description={label} decorative size={15} />
+      <Text style={styles.aboutPillText}>{label}</Text>
+    </View>
+  );
+}
+
+function AboutPrinciple({
+  theme,
+  icon,
+  title,
+  body,
+}: {
+  theme: typeof brand.appThemes[keyof typeof brand.appThemes];
+  icon: MaterialSymbolName;
+  title: string;
+  body: string;
+}) {
+  return (
+    <View style={[styles.principleCard, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+      <View style={[styles.principleIcon, { backgroundColor: theme.primaryContainer }]}>
+        <MaterialSymbol name={icon} color={theme.onPrimaryContainer} description={title} decorative size={17} />
+      </View>
+      <View style={styles.principleCopy}>
+        <Text style={[styles.principleTitle, { color: theme.text }]}>{title}</Text>
+        <Text style={[styles.principleBody, { color: theme.muted }]}>{body}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -112,66 +170,159 @@ function executionEnvironmentLabel(environment: string) {
 }
 
 const styles = StyleSheet.create({
+  routeShell: {
+    flex: 1,
+  },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 52,
+    paddingTop: 44,
     paddingBottom: 44,
-    gap: 16,
+    gap: 18,
+  },
+  contentWide: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
   },
   versionPill: {
     minHeight: 34,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
-    backgroundColor: '#E7D9B7',
+    backgroundColor: brand.colors.primaryContainer,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
   versionPillText: {
-    color: '#171811',
+    color: brand.colors.onPrimaryContainer,
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0,
   },
   hero: {
-    minHeight: 252,
-    borderRadius: 30,
+    minHeight: 206,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    backgroundColor: '#151611',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 10,
-    boxShadow: '0 24px 54px rgba(0, 0, 0, 0.22)',
+    borderColor: 'rgba(18, 20, 15, 0.08)',
+    backgroundColor: brand.colors.paperElevated,
+    padding: 18,
+    gap: 16,
+    boxShadow: brand.shadow.card,
+    overflow: 'hidden',
   },
-  logoBoard: {
-    width: '100%',
-    maxWidth: 300,
-    height: 160,
+  heroBrandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  heroLogoSeal: {
+    width: 76,
+    height: 76,
     borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    backgroundColor: '#F3E9D2',
+    overflow: 'hidden',
+    boxShadow: '0 12px 24px rgba(18, 20, 15, 0.12)',
+  },
+  heroLogo: {
+    width: '100%',
+    height: '100%',
+  },
+  heroCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
   },
   eyebrow: {
-    color: '#D8C59A',
+    color: brand.colors.copper,
     fontSize: 12,
     fontWeight: '900',
+    letterSpacing: 0,
   },
   title: {
-    color: '#F7F0E4',
-    fontSize: 46,
-    lineHeight: 52,
+    color: brand.colors.ink,
+    fontSize: 42,
+    lineHeight: 46,
     fontWeight: '900',
+    letterSpacing: 0,
   },
   subtitle: {
-    color: 'rgba(247, 240, 228, 0.72)',
-    textAlign: 'center',
+    color: brand.colors.muted,
     fontSize: 15,
     lineHeight: 23,
     fontWeight: '700',
+    letterSpacing: 0,
+  },
+  heroDivider: {
+    height: 1,
+    backgroundColor: 'rgba(18, 20, 15, 0.08)',
+  },
+  heroPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  aboutPill: {
+    minHeight: 36,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    backgroundColor: brand.colors.copperSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(47, 107, 79, 0.16)',
+  },
+  aboutPillText: {
+    color: brand.colors.onPrimaryContainer,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   promiseGrid: {
-    gap: 10,
+    gap: 8,
+  },
+  principleCard: {
+    minHeight: 78,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    boxShadow: '0 6px 16px rgba(18, 20, 15, 0.05)',
+  },
+  principleIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: brand.radius.small,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  principleCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  principleTitle: {
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  principleBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  infoSectionSurface: {
+    padding: 10,
+    gap: 0,
   },
   paragraph: {
     color: brand.colors.muted,

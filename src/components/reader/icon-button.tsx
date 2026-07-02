@@ -36,7 +36,7 @@ export function IconButton({ icon, label, tintColor, tone = 'dark', size = 'regu
         disabled && styles.disabledButton,
         style,
       ]}>
-      <MaterialSymbol name={icon} color={resolvedTintColor} description={label} size={18} style={styles.iconHost} />
+      <MaterialSymbol name={icon} color={resolvedTintColor} description={label} decorative size={18} style={styles.iconHost} />
       {size !== 'icon' && (
         <Text style={[styles.label, { color: resolvedTintColor }]} numberOfLines={1}>
           {label}
@@ -47,7 +47,7 @@ export function IconButton({ icon, label, tintColor, tone = 'dark', size = 'regu
         disabled={disabled}
         feedback={size === 'extended' ? 'standard' : 'subtle'}
         hitSlop={10}
-        stateLayerColor={tone === 'filled' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(231, 217, 183, 0.20)'}
+        stateLayerColor={tone === 'filled' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(205, 232, 208, 0.20)'}
         style={styles.touchOverlay}
         {...props}
       />

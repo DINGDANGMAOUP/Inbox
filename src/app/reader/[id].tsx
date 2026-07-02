@@ -14,16 +14,17 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Animated, { FadeIn, FadeOut, SlideInDown, SlideInUp, SlideOutDown, SlideOutUp } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
 import { AdaptiveSurface } from '@/components/reader/adaptive-surface';
 import { IconButton } from '@/components/reader/icon-button';
 import { M3FilterChip, M3Screen, M3SegmentedControl, M3StatePanel, M3Stepper } from '@/components/reader/m3';
+import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brand } from '@/constants/brand';
-import { motion } from '@/constants/motion';
 import { readerThemeAssets } from '@/constants/theme-assets';
 import {
   createAnnotation,
@@ -483,12 +484,14 @@ function ReaderToolChip({
     <M3Pressable
       onPress={onPress}
       feedback={active ? 'subtle' : 'standard'}
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
       style={[
         styles.readerToolChip,
         primary && styles.readerToolChipPrimary,
         { backgroundColor, borderColor: active ? chromeTheme.accent : chromeTheme.controlBorder },
       ]}>
-      <MaterialSymbol name={icon} color={color} description={label} size={17} />
+      <MaterialSymbol name={icon} color={color} description={label} decorative size={17} />
       <Text numberOfLines={1} style={[styles.readerToolChipText, { color }]}>
         {label}
       </Text>
@@ -499,6 +502,7 @@ function ReaderToolChip({
 export default function ReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
+  const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
   const lastProgressSave = useRef(0);
   const [book, setBook] = useState<Book | null>(null);
@@ -528,21 +532,21 @@ export default function ReaderScreen() {
   const currentChapter = chapters[currentIndex];
   const themeToken = brand.readerThemes[preferences.readerTheme];
   const readerTheme = themeToken;
-  const chromePanelSurface = preferences.readerTheme === 'night' ? '#171A18' : '#151611';
-  const chromeSubtleSurface = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.075)' : 'rgba(255, 255, 255, 0.08)';
-  const chromeBorder = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.13)' : 'rgba(255, 255, 255, 0.11)';
+  const chromePanelSurface = preferences.readerTheme === 'night' ? '#171A18' : brand.chrome.surface;
+  const chromeSubtleSurface = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.075)' : brand.chrome.surfaceSoft;
+  const chromeBorder = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.13)' : brand.chrome.border;
   const chromeTheme = {
     surface: chromePanelSurface,
     panelSurface: chromePanelSurface,
     subtleSurface: chromeSubtleSurface,
     border: chromeBorder,
     controlBorder: chromeBorder,
-    text: '#F7F0E4',
-    muted: 'rgba(247, 240, 228, 0.62)',
-    accent: '#E7D9B7',
-    accentText: '#171811',
-    primaryContainer: '#E7D9B7',
-    onPrimaryContainer: '#171811',
+    text: brand.chrome.text,
+    muted: brand.chrome.muted,
+    accent: brand.chrome.accent,
+    accentText: brand.chrome.accentText,
+    primaryContainer: brand.chrome.accent,
+    onPrimaryContainer: brand.chrome.accentText,
   };
   const panelControlTheme = {
     surface: chromeTheme.subtleSurface,
@@ -864,7 +868,7 @@ export default function ReaderScreen() {
             theme={themeToken}
             title="未找到这本书"
             body="这本书可能已被删除，或本机数据库仍在整理。"
-            artwork={<MaterialSymbol name="error" color={themeToken.accent} description="未找到这本书" size={28} />}>
+            artwork={<MaterialSymbol name="error" color={themeToken.accent} description="未找到这本书" decorative size={28} />}>
             <IconButton
               icon="chevron.left"
               label="返回书架"
@@ -904,9 +908,9 @@ export default function ReaderScreen() {
 
       {chromeVisible && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : SlideInUp.duration(motion.duration.medium)}
-          exiting={reduceMotion ? FadeOut.duration(80) : SlideOutUp.duration(motion.duration.short)}
-          style={styles.topChrome}>
+          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeUp()}
+          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutUp()}
+          style={[styles.topChrome, { top: Math.max(24, insets.top + 12) }]}>
           <AdaptiveSurface style={[styles.topBar, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <IconButton
               icon="chevron.left"
@@ -935,9 +939,9 @@ export default function ReaderScreen() {
 
       {chromeVisible && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : SlideInDown.duration(motion.duration.medium)}
-          exiting={SlideOutDown.duration(motion.duration.short)}
-          style={styles.bottomChrome}>
+          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
+          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
+          style={[styles.bottomChrome, { bottom: Math.max(16, insets.bottom + 12) }]}>
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <View style={[styles.chapterStrip, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
               <M3Pressable
@@ -976,15 +980,15 @@ export default function ReaderScreen() {
 
       {panel && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : SlideInDown.duration(motion.duration.medium)}
-          exiting={SlideOutDown.duration(motion.duration.short)}
-          style={styles.panel}>
+          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
+          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
+          style={[styles.panel, { bottom: Math.max(16, insets.bottom + 12) }]}>
           <AdaptiveSurface style={[styles.panelSurface, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
             <View style={[styles.panelHandle, { backgroundColor: chromeTheme.controlBorder }]} />
             <View style={styles.panelHeader}>
               <View style={styles.panelTitleStack}>
                 <View style={styles.panelTitleRow}>
-                  <MaterialSymbol name={panelIcon(panel)} color={chromeTheme.accent} description={panelTitle(panel)} size={20} />
+                  <MaterialSymbol name={panelIcon(panel)} color={chromeTheme.accent} description={panelTitle(panel)} decorative size={20} />
                   <Text style={[styles.panelTitle, { color: chromeTheme.text }]}>{panelTitle(panel)}</Text>
                 </View>
               </View>
@@ -995,7 +999,7 @@ export default function ReaderScreen() {
                 onPress={closePanel}
                 feedback="subtle"
                 style={[styles.closeButton, { backgroundColor: chromeTheme.subtleSurface }]}>
-                <MaterialSymbol name="close" color={chromeTheme.text} description="关闭" size={18} />
+                <MaterialSymbol name="close" color={chromeTheme.text} description="关闭" decorative size={18} />
               </M3Pressable>
             </View>
 
@@ -1087,7 +1091,7 @@ export default function ReaderScreen() {
                       { backgroundColor: currentBookmark ? chromeTheme.accent : chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder },
                     ]}>
                     <View style={styles.annotationActionHeader}>
-                      <MaterialSymbol name={currentBookmark ? 'check.circle' : 'bookmark'} color={currentBookmark ? chromeTheme.accentText : chromeTheme.accent} description="本章书签" size={18} />
+                      <MaterialSymbol name={currentBookmark ? 'check.circle' : 'bookmark'} color={currentBookmark ? chromeTheme.accentText : chromeTheme.accent} description="本章书签" decorative size={18} />
                       <Text style={[styles.annotationActionTitle, { color: currentBookmark ? chromeTheme.accentText : chromeTheme.text }]}>
                         {currentBookmark ? '取消书签' : '本章书签'}
                       </Text>
@@ -1102,7 +1106,7 @@ export default function ReaderScreen() {
                     accessibilityRole="button"
                     style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
                     <View style={styles.annotationActionHeader}>
-                      <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" size={18} />
+                      <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" decorative size={18} />
                       <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>划线</Text>
                     </View>
                     <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>先选中文字</Text>
@@ -1208,7 +1212,7 @@ export default function ReaderScreen() {
                       <View style={[styles.themeChipOverlay, theme === 'night' && styles.themeChipDeepOverlay, preferences.readerTheme === theme && styles.activeThemeChipOverlay]} />
                       {preferences.readerTheme === theme ? (
                         <View style={[styles.themeChipCheck, { backgroundColor: brand.readerThemes[theme].accent }]}>
-                          <MaterialSymbol name="check" color={brand.readerThemes[theme].accentText} description="当前阅读主题" size={14} />
+                          <MaterialSymbol name="check" color={brand.readerThemes[theme].accentText} description="当前阅读主题" decorative size={14} />
                         </View>
                       ) : null}
                       <Text style={[styles.themeChipText, { color: preferences.readerTheme === theme ? brand.readerThemes[theme].onPrimaryContainer : brand.readerThemes[theme].text }]}>
@@ -1240,7 +1244,10 @@ export default function ReaderScreen() {
       )}
 
       {notice && (
-        <Animated.View entering={FadeIn.duration(reduceMotion ? 80 : motion.duration.short)} exiting={FadeOut.duration(motion.duration.short)} style={styles.noticeToast}>
+        <Animated.View
+          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
+          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.fadeShortOut()}
+          style={[styles.noticeToast, { top: Math.max(96, insets.top + 74) }]}>
           <Text style={styles.noticeToastText}>{notice}</Text>
         </Animated.View>
       )}
@@ -1283,20 +1290,20 @@ const styles = StyleSheet.create({
   },
   topChrome: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: 18,
+    right: 18,
     top: 48,
   },
   topBar: {
     minHeight: 56,
-    borderRadius: 24,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     paddingHorizontal: 9,
     gap: 12,
-    boxShadow: '0 18px 38px rgba(0, 0, 0, 0.22)',
+    boxShadow: '0 12px 26px rgba(18, 20, 15, 0.16)',
   },
   backButton: {
     width: 42,
@@ -1328,21 +1335,21 @@ const styles = StyleSheet.create({
   },
   bottomChrome: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: 18,
+    right: 18,
     bottom: 18,
   },
   readerDock: {
-    borderRadius: 28,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     borderWidth: 1,
     padding: 8,
     gap: 7,
-    boxShadow: '0 22px 46px rgba(0, 0, 0, 0.28)',
+    boxShadow: '0 16px 34px rgba(18, 20, 15, 0.22)',
   },
   chapterStrip: {
     minHeight: 46,
-    borderRadius: 20,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     borderWidth: 1,
     flexDirection: 'row',
@@ -1353,7 +1360,7 @@ const styles = StyleSheet.create({
   },
   chapterTextButton: {
     minWidth: 58,
-    minHeight: 34,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: brand.radius.round,
@@ -1394,8 +1401,8 @@ const styles = StyleSheet.create({
   readerToolChip: {
     flex: 1,
     minWidth: 0,
-    minHeight: 42,
-    borderRadius: brand.radius.round,
+    minHeight: 46,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
     borderWidth: 1,
     flexDirection: 'row',
@@ -1417,20 +1424,20 @@ const styles = StyleSheet.create({
   },
   panel: {
     position: 'absolute',
-    left: 14,
-    right: 14,
+    left: 18,
+    right: 18,
     bottom: 16,
     maxHeight: '74%',
   },
   panelSurface: {
-    borderRadius: 28,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 14,
     gap: 12,
-    boxShadow: '0 24px 52px rgba(0, 0, 0, 0.30)',
+    boxShadow: '0 18px 38px rgba(18, 20, 15, 0.24)',
   },
   panelHandle: {
     width: 42,
@@ -1462,9 +1469,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   closeButton: {
-    width: 38,
-    minWidth: 38,
-    minHeight: 38,
+    width: 44,
+    minWidth: 44,
+    minHeight: 44,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
     alignItems: 'center',
@@ -1560,30 +1567,31 @@ const styles = StyleSheet.create({
   },
   currentBadge: {
     borderRadius: brand.radius.round,
-    backgroundColor: '#E7D9B7',
+    backgroundColor: brand.chrome.accent,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
   currentBadgeText: {
-    color: '#171811',
+    color: brand.chrome.accentText,
     fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0,
   },
   searchMatchText: {
-    color: '#171811',
-    backgroundColor: '#E7D9B7',
+    color: brand.chrome.accentText,
+    backgroundColor: brand.chrome.accent,
     fontWeight: '900',
   },
   saveNoteButton: {
     alignSelf: 'flex-start',
-    backgroundColor: '#E7D9B7',
+    minHeight: 44,
+    backgroundColor: brand.chrome.accent,
     borderRadius: brand.radius.round,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   saveNoteText: {
-    color: '#171811',
+    color: brand.chrome.accentText,
     fontWeight: '900',
     letterSpacing: 0,
   },

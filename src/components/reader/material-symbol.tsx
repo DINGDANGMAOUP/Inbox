@@ -53,13 +53,15 @@ type MaterialSymbolProps = {
   color: string;
   size?: number;
   description?: string;
+  decorative?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 };
 
-export function MaterialSymbol({ name, color, size = 18, description, style, textStyle }: MaterialSymbolProps) {
+export function MaterialSymbol({ name, color, size = 18, description, decorative = false, style, textStyle }: MaterialSymbolProps) {
   const source = materialSymbolSources[name] ?? AddIcon;
   const fallbackLabel = description ?? name;
+  const accessibilityLabel = decorative ? undefined : description ?? name;
 
   if (Platform.OS === 'ios') {
     return (
@@ -69,20 +71,34 @@ export function MaterialSymbol({ name, color, size = 18, description, style, tex
         tintColor={color}
         contentFit="contain"
         pointerEvents="none"
+        accessible={!decorative}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityElementsHidden={decorative}
+        importantForAccessibility={decorative ? 'no-hide-descendants' : 'auto'}
       />
     );
   }
 
   if (Platform.OS === 'android') {
     return (
-      <Host matchContents pointerEvents="none" style={[{ width: size, height: size }, style]}>
-        <MaterialIcon source={source} size={size} tint={color} contentDescription={description ?? name} />
+      <Host
+        matchContents
+        pointerEvents="none"
+        style={[{ width: size, height: size }, style]}>
+        <MaterialIcon source={source} size={size} tint={color} contentDescription={decorative ? undefined : description ?? name} />
       </Host>
     );
   }
 
   return (
-    <Text pointerEvents="none" style={[styles.fallback, { color, width: size, fontSize: Math.max(11, size * 0.72) }, textStyle]} numberOfLines={1}>
+    <Text
+      pointerEvents="none"
+      style={[styles.fallback, { color, width: size, fontSize: Math.max(11, size * 0.72) }, textStyle]}
+      numberOfLines={1}
+      accessible={!decorative}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityElementsHidden={decorative}
+      importantForAccessibility={decorative ? 'no-hide-descendants' : 'auto'}>
       {fallbackLabel.slice(0, 1).toUpperCase()}
     </Text>
   );
