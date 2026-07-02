@@ -263,18 +263,18 @@ export default function LibraryScreen() {
               tone="quiet"
               icon="settings"
               label="设置"
-              tintColor={ambientTextColor}
+              tintColor="#F7F0E4"
               size="icon"
-              style={[styles.appBarIconButton, { backgroundColor: isDeepTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(22, 22, 18, 0.08)', borderColor: theme.line }]}
+              style={styles.appBarIconButton}
               onPress={() => router.push('/settings')}
             />
             <IconButton
               tone="quiet"
               icon="info"
               label="关于"
-              tintColor={ambientTextColor}
+              tintColor="#F7F0E4"
               size="icon"
-              style={[styles.appBarIconButton, { backgroundColor: isDeepTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(22, 22, 18, 0.08)', borderColor: theme.line }]}
+              style={styles.appBarIconButton}
               onPress={() => router.push('/about')}
             />
           </View>
@@ -357,9 +357,9 @@ export default function LibraryScreen() {
           entering={FadeInDown.duration(motion.duration.short)}
           exiting={FadeOut.duration(motion.duration.short)}
           style={[styles.searchContext, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-          <Text style={[styles.searchContextText, { color: theme.accent }]}>正在筛选书架</Text>
+          <Text style={styles.searchContextText}>正在筛选书架</Text>
           <M3Pressable onPress={() => setQuery('')} hitSlop={8} feedback="subtle">
-            <Text style={[styles.clearSearchText, { color: theme.text }]}>清除</Text>
+            <Text style={styles.clearSearchText}>清除</Text>
           </M3Pressable>
         </Animated.View>
       )}
@@ -378,7 +378,7 @@ export default function LibraryScreen() {
             </View>
             <View style={styles.featuredCopy}>
               <View style={styles.featuredHeaderRow}>
-                <Text style={styles.sectionKicker}>{featuredStarted ? 'CONTINUE' : 'LATEST'}</Text>
+                <Text style={styles.sectionKicker}>{featuredStarted ? '继续阅读' : '最近导入'}</Text>
                 <View style={[styles.featuredStatusChip, { backgroundColor: theme.text }]}>
                   <Text style={[styles.featuredStatusText, { color: theme.surfaceSolid }]}>{statusLabel(featuredBook)}</Text>
                 </View>
@@ -429,7 +429,7 @@ export default function LibraryScreen() {
 
       <View style={styles.sectionHeader}>
         <View>
-          <Text style={styles.sectionKickerDark}>SHELF</Text>
+          <Text style={styles.sectionKickerDark}>书架</Text>
           <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>{filter === 'reading' ? '继续阅读' : filter === 'unread' ? '未开始' : '全部书籍'}</Text>
         </View>
         <Text style={[styles.count, { color: ambientMutedColor }]}>{filteredBooks.length} 本书</Text>
@@ -543,6 +543,9 @@ const styles = StyleSheet.create({
     minWidth: 44,
     minHeight: 44,
     paddingHorizontal: 0,
+    backgroundColor: '#151611',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    boxShadow: '0 12px 26px rgba(0, 0, 0, 0.16)',
   },
   libraryHero: {
     borderRadius: 30,
@@ -664,9 +667,9 @@ const styles = StyleSheet.create({
     minHeight: 44,
     borderRadius: 18,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(221, 230, 237, 0.78)',
+    backgroundColor: '#151611',
     borderWidth: 1,
-    borderColor: 'rgba(82, 109, 123, 0.24)',
+    borderColor: 'rgba(255, 255, 255, 0.10)',
     paddingHorizontal: 13,
     flexDirection: 'row',
     alignItems: 'center',
@@ -674,13 +677,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   searchContextText: {
-    color: brand.colors.islandDeep,
+    color: '#F7F0E4',
     fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0,
   },
   clearSearchText: {
-    color: brand.colors.ink,
+    color: '#E7D9B7',
     fontSize: 13,
     fontWeight: '900',
     letterSpacing: 0,

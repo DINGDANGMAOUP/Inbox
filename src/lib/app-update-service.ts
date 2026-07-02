@@ -70,7 +70,7 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
     return {
       status: 'unsupported',
       current,
-      message: '当前平台不支持应用内更新。',
+      message: '当前平台不支持内测更新。',
     };
   }
 
@@ -82,7 +82,7 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
         status: 'current',
         current,
         remote,
-        message: '已是最新版本',
+        message: '暂无新内测',
       };
     }
 

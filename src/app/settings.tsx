@@ -63,7 +63,7 @@ export default function SettingsScreen() {
   const installedVersion = useMemo(() => getInstalledAppVersion(), []);
   const updateSource = useMemo(() => getUpdateSourceInfo(), []);
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('idle');
-  const [updateMessage, setUpdateMessage] = useState('检查应用更新');
+  const [updateMessage, setUpdateMessage] = useState('检查内测更新');
   const [remoteUpdate, setRemoteUpdate] = useState<RemoteAppVersion | undefined>();
   const [downloadedApkUri, setDownloadedApkUri] = useState<string | undefined>();
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -140,7 +140,7 @@ export default function SettingsScreen() {
       setUpdateMessage('下载完成');
     } catch (error) {
       setUpdatePhase('error');
-      setUpdateMessage(error instanceof Error ? error.message : '下载更新失败。');
+      setUpdateMessage(error instanceof Error ? error.message : '下载内测失败。');
     }
   }, [remoteUpdate]);
 
@@ -368,7 +368,7 @@ function UpdatePanel({
         <M3InfoRow theme={theme} title="来源" value={sourceLabel} />
         {remoteUpdate ? (
           <>
-            <M3InfoRow theme={theme} title="最新版本" value={`${remoteUpdate.version} (${remoteUpdate.buildNumber})`} />
+            <M3InfoRow theme={theme} title="内测版本" value={`${remoteUpdate.version} (${remoteUpdate.buildNumber})`} />
             <M3InfoRow theme={theme} title="大小" value={remoteUpdate.apkSize ? formatBytes(remoteUpdate.apkSize) : '待获取'} />
           </>
         ) : null}
@@ -376,7 +376,7 @@ function UpdatePanel({
 
       {remoteUpdate ? (
         <View style={[styles.releaseNoteBox, { backgroundColor: theme.surfaceContainer }]}>
-          <Text style={[styles.releaseNoteTitle, { color: theme.text }]}>{remoteUpdate.force ? '重要更新' : '更新说明'}</Text>
+          <Text style={[styles.releaseNoteTitle, { color: theme.text }]}>{remoteUpdate.force ? '重要内测' : '内测说明'}</Text>
           <Text style={[styles.releaseNoteText, { color: theme.muted }]} numberOfLines={2}>
             {remoteUpdate.releaseNotes}
           </Text>
@@ -409,8 +409,8 @@ function UpdatePanel({
             styles.secondaryButton,
             { backgroundColor: theme.surfaceContainerHigh, borderColor: theme.line },
           ]}>
-          <MaterialSymbol name="info" color={theme.text} description="查看 Release" size={16} />
-          <Text style={[styles.secondaryButtonText, { color: theme.text }]}>查看 Release</Text>
+          <MaterialSymbol name="info" color={theme.text} description="查看内测" size={16} />
+          <Text style={[styles.secondaryButtonText, { color: theme.text }]}>查看内测</Text>
         </M3Pressable>
       </View>
 
@@ -424,9 +424,9 @@ function updatePhaseTitle(phase: UpdatePhase) {
     case 'checking':
       return '检查中';
     case 'current':
-      return '已是最新';
+      return '暂无新内测';
     case 'available':
-      return '发现新版本';
+      return '发现内测';
     case 'downloading':
       return '下载中';
     case 'downloaded':
@@ -436,9 +436,9 @@ function updatePhaseTitle(phase: UpdatePhase) {
     case 'unsupported':
       return '当前平台不支持';
     case 'error':
-      return '更新失败';
+      return '内测检查失败';
     default:
-      return '应用更新';
+      return '内测更新';
   }
 }
 
