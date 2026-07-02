@@ -1,18 +1,18 @@
-name: Android Release
+name: Android Internal Test Release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: App versionName, for example 1.0.1
+        description: App versionName, for example 0.0.1
         required: true
         type: string
       buildNumber:
-        description: Android versionCode, must increase every release
+        description: Android versionCode, must increase every internal build
         required: true
         type: string
       releaseNotes:
-        description: Release notes shown in the app
+        description: Internal test notes shown in the app
         required: false
         type: string
       force:
@@ -23,12 +23,12 @@ on:
       prerelease:
         description: Create as GitHub prerelease
         required: true
-        default: false
+        default: true
         type: boolean
 
 jobs:
   build-release-apk:
-    name: Build and publish APK
+    name: Build and publish internal APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -154,7 +154,7 @@ jobs:
             minSupportedBuild: 1,
             apkUrl: process.env.APK_URL,
             apkSize: Number(process.env.APK_SIZE),
-            releaseNotes: process.env.RELEASE_NOTES || '这个版本没有填写更新说明。',
+            releaseNotes: process.env.RELEASE_NOTES || '这个内测版本没有填写更新说明。',
             force: process.env.FORCE_UPDATE === 'true',
             publishedAt: new Date().toISOString(),
             tagName: process.env.TAG,
@@ -164,7 +164,7 @@ jobs:
           fs.writeFileSync('release/release-notes.md', payload.releaseNotes);
           NODE
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub Internal Test Release
         run: |
           TAG="android-v${VERSION}+${BUILD_NUMBER}"
           FLAGS=()
@@ -176,7 +176,7 @@ jobs:
           gh release create "$TAG" \
             "release/Inbox-${VERSION}-${BUILD_NUMBER}.apk" \
             "release/latest.json" \
-            --title "墨屿 Android ${VERSION} (${BUILD_NUMBER})" \
+            --title "墨屿 Android 内测 ${VERSION} (${BUILD_NUMBER})" \
             --notes-file release/release-notes.md \
             "${FLAGS[@]}"
         env:

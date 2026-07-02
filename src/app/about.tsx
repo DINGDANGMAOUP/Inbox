@@ -57,7 +57,7 @@ export default function AboutScreen() {
           }
           trailing={
             <View style={styles.versionPill}>
-              <Text style={styles.versionPillText}>v{installedVersion.version}</Text>
+              <Text style={styles.versionPillText}>v{installedVersion.version} 内测</Text>
             </View>
           }
         />
@@ -81,6 +81,7 @@ export default function AboutScreen() {
         <M3Section theme={theme} title="产品信息" order={3}>
           <M3InfoRow theme={theme} title="产品名" value="墨屿" icon="info" />
           <M3InfoRow theme={theme} title="英文名" value="Inbox" icon="info" />
+          <M3InfoRow theme={theme} title="阶段" value="开发内测" icon="check.circle" />
           <M3InfoRow theme={theme} title="版本" value={`${installedVersion.version} (${installedVersion.buildNumber || '开发'})`} icon="check.circle" />
           <M3InfoRow theme={theme} title="运行环境" value={executionEnvironmentLabel(String(installedVersion.environment))} icon="settings" />
           <M3InfoRow theme={theme} title="支持格式" value="EPUB / TXT" icon="tray.and.arrow.down" />

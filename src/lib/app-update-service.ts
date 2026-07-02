@@ -44,7 +44,7 @@ type LatestJson = Partial<Omit<RemoteAppVersion, 'tagName' | 'releaseUrl'>> & {
 };
 
 export function getInstalledAppVersion(): InstalledAppVersion {
-  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const version = Constants.expoConfig?.version ?? '0.0.1';
   const rawBuildNumber = String(Constants.expoConfig?.android?.versionCode ?? 0);
   const buildNumber = Number.parseInt(rawBuildNumber, 10);
 
@@ -57,9 +57,9 @@ export function getInstalledAppVersion(): InstalledAppVersion {
 
 export function getUpdateSourceInfo() {
   return {
-    label: 'GitHub Release',
+    label: 'GitHub 内测',
     repository: `${updateConfig.owner}/${updateConfig.repo}`,
-    latestReleaseUrl: `https://github.com/${updateConfig.owner}/${updateConfig.repo}/releases/latest`,
+    latestReleaseUrl: `https://github.com/${updateConfig.owner}/${updateConfig.repo}/releases`,
   };
 }
 
@@ -90,13 +90,13 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
       status: 'available',
       current,
       remote,
-      message: `发现新版本 ${remote.version}`,
+      message: `发现内测版本 ${remote.version}`,
     };
   } catch (error) {
     return {
       status: 'error',
       current,
-      message: error instanceof Error ? error.message : '检查 GitHub 最新版本失败。',
+      message: error instanceof Error ? error.message : '检查 GitHub 内测版本失败。',
     };
   }
 }
@@ -149,12 +149,18 @@ export async function openReleasePage(remote?: RemoteAppVersion) {
 }
 
 async function fetchLatestVersionMarker(): Promise<RemoteAppVersion> {
-  const latestJsonUrl = `https://github.com/${updateConfig.owner}/${updateConfig.repo}/releases/latest/download/latest.json`;
-  const manifest = await fetchLatestJson(latestJsonUrl);
+  const release = await fetchLatestInternalRelease();
+  const latestJsonAsset = release.assets.find((asset) => asset.name === 'latest.json');
+
+  if (!latestJsonAsset) {
+    throw new Error('暂未找到内测版本信息。');
+  }
+
+  const manifest = await fetchLatestJson(latestJsonAsset.browser_download_url);
   const buildNumber = Number(manifest.buildNumber);
 
   if (!manifest.version || !Number.isFinite(buildNumber) || buildNumber <= 0 || !manifest.apkUrl) {
-    throw new Error('GitHub latest.json 缺少 version、buildNumber 或 apkUrl。');
+    throw new Error('GitHub 内测 latest.json 缺少 version、buildNumber 或 apkUrl。');
   }
 
   return {
@@ -163,12 +169,49 @@ async function fetchLatestVersionMarker(): Promise<RemoteAppVersion> {
     minSupportedBuild: manifest.minSupportedBuild,
     apkUrl: manifest.apkUrl,
     apkSize: manifest.apkSize,
-    releaseNotes: manifest.releaseNotes ?? '这个版本没有填写更新说明。',
+    releaseNotes: manifest.releaseNotes ?? '这个内测版本没有填写更新说明。',
     force: Boolean(manifest.force),
-    publishedAt: manifest.publishedAt,
-    tagName: manifest.tagName ?? `android-v${manifest.version}+${buildNumber}`,
-    releaseUrl: manifest.releaseUrl ?? `https://github.com/${updateConfig.owner}/${updateConfig.repo}/releases/latest`,
+    publishedAt: manifest.publishedAt ?? release.published_at,
+    tagName: manifest.tagName ?? release.tag_name,
+    releaseUrl: manifest.releaseUrl ?? release.html_url,
   };
+}
+
+type GithubRelease = {
+  tag_name: string;
+  html_url: string;
+  draft: boolean;
+  prerelease: boolean;
+  published_at?: string;
+  assets: {
+    name: string;
+    browser_download_url: string;
+  }[];
+};
+
+async function fetchLatestInternalRelease() {
+  const releasesUrl = `https://api.github.com/repos/${updateConfig.owner}/${updateConfig.repo}/releases?per_page=20`;
+  const response = await fetch(releasesUrl, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('暂未找到内测版本。');
+    }
+    throw new Error(`内测版本读取失败：HTTP ${response.status}`);
+  }
+
+  const releases = (await response.json()) as GithubRelease[];
+  const release = releases.find((item) => item.prerelease && !item.draft && item.assets.some((asset) => asset.name === 'latest.json'));
+
+  if (!release) {
+    throw new Error('暂未发布内测版本。');
+  }
+
+  return release;
 }
 
 async function fetchLatestJson(url: string) {
@@ -180,9 +223,9 @@ async function fetchLatestJson(url: string) {
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error('暂未找到版本信息。');
+      throw new Error('暂未找到内测版本信息。');
     }
-    throw new Error(`版本标记读取失败：HTTP ${response.status}`);
+    throw new Error(`内测版本标记读取失败：HTTP ${response.status}`);
   }
 
   return (await response.json()) as LatestJson;

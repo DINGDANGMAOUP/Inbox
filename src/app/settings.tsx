@@ -363,7 +363,7 @@ function UpdatePanel({
       <M3StepRail theme={theme} steps={['检查', '下载', '安装']} activeIndex={updateStepIndex(phase)} />
 
       <View style={styles.infoBlock}>
-        <M3InfoRow theme={theme} title="当前版本" value={`${installedVersion} (${installedBuild || '开发'})`} />
+        <M3InfoRow theme={theme} title="当前版本" value={`${installedVersion} (${installedBuild || '开发'}) · 内测`} />
         <M3InfoRow theme={theme} title="检查时间" value={lastCheckedAt ? formatCheckedAt(lastCheckedAt) : '未检查'} />
         <M3InfoRow theme={theme} title="来源" value={sourceLabel} />
         {remoteUpdate ? (
