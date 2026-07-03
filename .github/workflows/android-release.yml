@@ -1,6 +1,8 @@
-name: Android Internal Test Release
+name: Android Release
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -25,10 +27,15 @@ on:
         required: true
         default: true
         type: boolean
+      releaseTag:
+        description: Existing GitHub Release tag to upload assets into, for example v0.0.1
+        required: false
+        type: string
 
 jobs:
   build-release-apk:
-    name: Build and publish internal APK
+    name: Build and publish APK
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -39,9 +46,40 @@ jobs:
       RELEASE_NOTES: ${{ inputs.releaseNotes }}
       FORCE_UPDATE: ${{ inputs.force }}
       PRERELEASE: ${{ inputs.prerelease }}
+      MANUAL_RELEASE_TAG: ${{ inputs.releaseTag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            RELEASE_TAG="$(jq -r '.release.tag_name' "$GITHUB_EVENT_PATH")"
+            VERSION="${RELEASE_TAG#v}"
+            BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+            RELEASE_NOTES="$(jq -r '.release.body // empty' "$GITHUB_EVENT_PATH")"
+            FORCE_UPDATE=false
+            PRERELEASE="$(jq -r '.release.prerelease' "$GITHUB_EVENT_PATH")"
+            RELEASE_MODE=upload
+          elif [ -n "$MANUAL_RELEASE_TAG" ]; then
+            RELEASE_TAG="$MANUAL_RELEASE_TAG"
+            RELEASE_MODE=upload
+          else
+            RELEASE_TAG="android-v${VERSION}+${BUILD_NUMBER}"
+            RELEASE_MODE=create
+          fi
+
+          {
+            echo "VERSION=$VERSION"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "FORCE_UPDATE=${FORCE_UPDATE:-false}"
+            echo "PRERELEASE=${PRERELEASE:-true}"
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "RELEASE_MODE=$RELEASE_MODE"
+            echo "RELEASE_NOTES<<EOF"
+            echo "${RELEASE_NOTES:-这个版本没有填写更新说明。}"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Validate signing secrets
         run: |
@@ -143,9 +181,8 @@ jobs:
           APK_NAME="Inbox-${VERSION}-${BUILD_NUMBER}.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "release/$APK_NAME"
           APK_SIZE="$(wc -c < "release/$APK_NAME" | tr -d ' ')"
-          TAG="android-v${VERSION}+${BUILD_NUMBER}"
-          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
-          export APK_SIZE APK_URL TAG
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${APK_NAME}"
+          export APK_SIZE APK_URL
           node - <<'NODE'
           const fs = require('node:fs');
           const payload = {
@@ -157,27 +194,33 @@ jobs:
             releaseNotes: process.env.RELEASE_NOTES || '这个内测版本没有填写更新说明。',
             force: process.env.FORCE_UPDATE === 'true',
             publishedAt: new Date().toISOString(),
-            tagName: process.env.TAG,
-            releaseUrl: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/tag/${process.env.TAG}`,
+            tagName: process.env.RELEASE_TAG,
+            releaseUrl: `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/tag/${process.env.RELEASE_TAG}`,
           };
           fs.writeFileSync('release/latest.json', `${JSON.stringify(payload, null, 2)}\n`);
           fs.writeFileSync('release/release-notes.md', payload.releaseNotes);
           NODE
 
-      - name: Publish GitHub Internal Test Release
+      - name: Publish GitHub Release
         run: |
-          TAG="android-v${VERSION}+${BUILD_NUMBER}"
-          FLAGS=()
-          if [ "$PRERELEASE" = "true" ]; then
-            FLAGS+=(--prerelease)
+          if [ "$RELEASE_MODE" = "upload" ]; then
+            gh release upload "$RELEASE_TAG" \
+              "release/Inbox-${VERSION}-${BUILD_NUMBER}.apk" \
+              "release/latest.json" \
+              --clobber
           else
-            FLAGS+=(--latest)
+            FLAGS=()
+            if [ "$PRERELEASE" = "true" ]; then
+              FLAGS+=(--prerelease)
+            else
+              FLAGS+=(--latest)
+            fi
+            gh release create "$RELEASE_TAG" \
+              "release/Inbox-${VERSION}-${BUILD_NUMBER}.apk" \
+              "release/latest.json" \
+              --title "墨屿 Android 内测 ${VERSION} (${BUILD_NUMBER})" \
+              --notes-file release/release-notes.md \
+              "${FLAGS[@]}"
           fi
-          gh release create "$TAG" \
-            "release/Inbox-${VERSION}-${BUILD_NUMBER}.apk" \
-            "release/latest.json" \
-            --title "墨屿 Android 内测 ${VERSION} (${BUILD_NUMBER})" \
-            --notes-file release/release-notes.md \
-            "${FLAGS[@]}"
         env:
           GH_TOKEN: ${{ github.token }}
