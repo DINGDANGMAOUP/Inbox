@@ -1,13 +1,12 @@
-import { useCallback, useEffect } from 'react';
-import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { type ReactNode, useCallback, useEffect } from 'react';
+import { ActivityIndicator, BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { IconButton } from '@/components/reader/icon-button';
-import { M3Screen, M3Section, M3SegmentedControl, M3StatePanel, M3Stepper, M3TopAppBar } from '@/components/reader/m3';
+import { M3Screen } from '@/components/reader/m3';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
-import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
@@ -50,17 +49,11 @@ const readerThemeSwatches: Record<ReaderTheme, ThemeChoiceSwatch> = {
 export default function SettingsScreen() {
   const { preferences, resolvedAppTheme, loading, saving, updatePreferences } = useReaderPreferences();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { closeRoute, routeStyle } = useRouteSlideTransition(width);
   const theme = brand.appThemes[resolvedAppTheme];
-  const headerTheme = {
-    ...theme,
-    surface: theme.surfaceSolid,
-    surfaceSolid: theme.surfaceSolid,
-    surfaceContainer: theme.surfaceContainer,
-    surfaceContainerHigh: theme.surfaceContainerHigh,
-    primaryContainer: theme.primaryContainer,
-    onPrimaryContainer: theme.onPrimaryContainer,
-  };
+  const topBarHeight = insets.top + 56;
+
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       closeRoute();
@@ -99,37 +92,52 @@ export default function SettingsScreen() {
         key={`settings-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
-        overlayColor={resolvedAppTheme === 'deep' ? 'rgba(8, 9, 6, 0.36)' : 'rgba(247, 243, 234, 0.78)'}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
-        <M3TopAppBar
-          theme={headerTheme}
-          title="设置"
-          subtitle="阅读偏好"
-          logoSource={brandAssets.logoMark}
-          leading={
-            <IconButton
-              icon="chevron.left"
-              label="返回"
-              tone="quiet"
-              tintColor={theme.text}
-              size="icon"
-              style={[styles.headerBackButton, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}
-              onPress={closeRoute}
-            />
-          }
-          trailing={
-            <View style={styles.saveBadge}>
-              <Text style={styles.headerMeta}>{saving ? '保存中' : '已保存'}</Text>
+        overlayColor={resolvedAppTheme === 'deep' ? 'rgba(8, 9, 6, 0.46)' : 'rgba(250, 248, 242, 0.93)'}>
+        <View
+          style={[
+            styles.navBar,
+            {
+              height: topBarHeight,
+              paddingTop: insets.top,
+              backgroundColor: resolvedAppTheme === 'deep' ? '#080906' : '#FAF8F2',
+              borderBottomColor: theme.line,
+            },
+          ]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="返回"
+            hitSlop={16}
+            pressRetentionOffset={18}
+            android_ripple={{ color: 'rgba(47, 107, 79, 0.14)', borderless: true, radius: 28 }}
+            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
+            onPress={closeRoute}>
+            <View pointerEvents="none" style={styles.backButtonIcon}>
+              <Text style={[styles.backButtonGlyph, { color: theme.text }]}>‹</Text>
             </View>
-          }
-        />
+          </Pressable>
+          <Text pointerEvents="none" numberOfLines={1} style={[styles.navTitle, { color: theme.text }]}>
+            设置
+          </Text>
+        </View>
 
-        {loading ? (
-          <M3StatePanel theme={theme} title="正在读取偏好" artwork={<ActivityIndicator color={theme.accent} />} />
-        ) : (
-          <>
-            <M3Section title="界面" kicker={appThemeModeCopy[preferences.appThemeMode].title} theme={theme} order={0} contentStyle={styles.settingsSectionSurface}>
-              <View style={styles.choiceList}>
+        <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={[styles.content, { paddingTop: topBarHeight + 24 }, width >= 700 && styles.contentWide]}>
+          {loading ? (
+            <View style={[styles.loadingPanel, { borderColor: theme.line, backgroundColor: theme.surfaceSolid }]}>
+              <ActivityIndicator color={theme.accent} />
+              <Text style={[styles.loadingText, { color: theme.muted }]}>正在读取偏好</Text>
+            </View>
+          ) : (
+            <>
+              <View style={[styles.intro, { borderBottomColor: theme.line }]}>
+                <Text style={[styles.screenMeta, { color: theme.muted }]}>
+                  {appThemeModeCopy[preferences.appThemeMode].title} · {readerThemeCopy[preferences.readerTheme].title} · {readingModeCopy[preferences.readingMode].title}
+                </Text>
+                <Text accessibilityLiveRegion="polite" style={[styles.saveStatus, { color: saving ? theme.accent : theme.muted }]}>
+                  {saving ? '保存中' : '已保存'}
+                </Text>
+              </View>
+
+              <SettingGroup theme={theme} title="界面主题" value={appThemeModeCopy[preferences.appThemeMode].title}>
                 {brand.appThemeModes.map((themeMode) => {
                   const active = preferences.appThemeMode === themeMode;
                   const copy = appThemeModeCopy[themeMode];
@@ -146,11 +154,9 @@ export default function SettingsScreen() {
                     />
                   );
                 })}
-              </View>
-            </M3Section>
+              </SettingGroup>
 
-            <M3Section title="纸张" kicker={readerThemeCopy[preferences.readerTheme].title} theme={theme} order={1} contentStyle={styles.settingsSectionSurface}>
-              <View style={styles.choiceGrid}>
+              <SettingGroup theme={theme} title="阅读纸张" value={readerThemeCopy[preferences.readerTheme].title}>
                 {brand.readerThemeOrder.map((readerTheme) => {
                   const active = preferences.readerTheme === readerTheme;
                   const copy = readerThemeCopy[readerTheme];
@@ -161,48 +167,57 @@ export default function SettingsScreen() {
                       title={copy.title}
                       detail={copy.body}
                       selected={active}
-                      compact
                       swatch={readerThemeSwatches[readerTheme]}
                       icon={readerTheme === 'night' ? 'textformat.size' : readerTheme === 'eink' ? 'list.bullet' : 'bookmark'}
                       onPress={() => updatePreference({ ...preferences, readerTheme })}
                     />
                   );
                 })}
-              </View>
-            </M3Section>
+              </SettingGroup>
 
-            <M3Section title="阅读" kicker={readingModeCopy[preferences.readingMode].title} theme={theme} order={2} contentStyle={styles.settingsSectionSurface}>
-              <ReadingPreview preferences={preferences} />
+              <SettingGroup theme={theme} title="阅读方式" value={readingModeCopy[preferences.readingMode].title}>
+                <ModeSelector
+                  theme={theme}
+                  value={preferences.readingMode}
+                  onChange={(readingMode) => updatePreference({ ...preferences, readingMode })}
+                />
+              </SettingGroup>
 
-              <M3SegmentedControl
-                theme={theme}
-                value={preferences.readingMode}
-                options={(['scroll', 'page'] as const).map((mode) => ({
-                  value: mode,
-                  title: readingModeCopy[mode].title,
-                }))}
-                onChange={(readingMode) => updatePreference({ ...preferences, readingMode })}
-              />
-
-              <View style={styles.stepperStack}>
-              <M3Stepper compact theme={theme} label="字号" value={String(preferences.fontSize)} onMinus={() => stepPreference('fontSize', -1)} onPlus={() => stepPreference('fontSize', 1)} />
-              <M3Stepper
-                compact
-                theme={theme}
-                label="行距"
-                value={preferences.lineHeight.toFixed(1)}
-                onMinus={() => stepPreference('lineHeight', -0.1)}
-                onPlus={() => stepPreference('lineHeight', 0.1)}
-              />
-              <M3Stepper compact theme={theme} label="页边距" value={String(preferences.margin)} onMinus={() => stepPreference('margin', -2)} onPlus={() => stepPreference('margin', 2)} />
-              </View>
-            </M3Section>
-
-          </>
-        )}
-      </ScrollView>
+              <SettingGroup theme={theme} title="排版">
+                <ReadingPreview preferences={preferences} />
+                <View style={styles.stepperStack}>
+                  <PreferenceStepper theme={theme} label="字号" value={String(preferences.fontSize)} onMinus={() => stepPreference('fontSize', -1)} onPlus={() => stepPreference('fontSize', 1)} />
+                  <PreferenceStepper theme={theme} label="行距" value={preferences.lineHeight.toFixed(1)} onMinus={() => stepPreference('lineHeight', -0.1)} onPlus={() => stepPreference('lineHeight', 0.1)} />
+                  <PreferenceStepper theme={theme} label="页边距" value={String(preferences.margin)} onMinus={() => stepPreference('margin', -2)} onPlus={() => stepPreference('margin', 2)} />
+                </View>
+              </SettingGroup>
+            </>
+          )}
+        </ScrollView>
       </M3Screen>
     </Animated.View>
+  );
+}
+
+function SettingGroup({
+  theme,
+  title,
+  value,
+  children,
+}: {
+  theme: SettingsTheme;
+  title: string;
+  value?: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.settingGroup}>
+      <View style={styles.settingHeader}>
+        <Text style={[styles.settingTitle, { color: theme.text }]}>{title}</Text>
+        {value ? <Text style={[styles.settingValue, { color: theme.accent }]}>{value}</Text> : null}
+      </View>
+      <View style={[styles.settingSurface, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>{children}</View>
+    </View>
   );
 }
 
@@ -213,7 +228,6 @@ function PreferenceChoice({
   selected,
   swatch,
   icon,
-  compact = false,
   onPress,
 }: {
   theme: SettingsTheme;
@@ -222,7 +236,6 @@ function PreferenceChoice({
   selected: boolean;
   swatch: ThemeChoiceSwatch;
   icon: MaterialSymbolName;
-  compact?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -233,20 +246,19 @@ function PreferenceChoice({
       accessibilityState={{ selected }}
       style={[
         styles.choiceRow,
-        compact && styles.choiceRowCompact,
         {
-          backgroundColor: selected ? theme.primaryContainer : theme.surfaceContainer,
-          borderColor: selected ? theme.accent : theme.line,
+          backgroundColor: 'transparent',
+          borderBottomColor: theme.line,
         },
       ]}>
-      <View style={[styles.choiceIcon, { backgroundColor: selected ? theme.accent : theme.surfaceSolid }]}>
-        <MaterialSymbol name={selected ? 'check' : icon} color={selected ? theme.accentText : theme.accent} description={title} decorative size={16} />
+      <View style={[styles.choiceIcon, { backgroundColor: selected ? theme.accent : theme.surfaceContainer }]}>
+        <MaterialSymbol name={selected ? 'check' : icon} color={selected ? theme.accentText : theme.muted} description={title} decorative size={16} />
       </View>
       <View style={styles.choiceCopy}>
-        <Text numberOfLines={1} style={[styles.choiceTitle, { color: selected ? theme.onPrimaryContainer : theme.text }]}>
+        <Text numberOfLines={1} style={[styles.choiceTitle, { color: theme.text }]}>
           {title}
         </Text>
-        <Text numberOfLines={1} style={[styles.choiceDetail, { color: selected ? theme.onPrimaryContainer : theme.muted }]}>
+        <Text numberOfLines={1} style={[styles.choiceDetail, { color: theme.muted }]}>
           {detail}
         </Text>
       </View>
@@ -256,6 +268,76 @@ function PreferenceChoice({
         ))}
       </View>
     </M3Pressable>
+  );
+}
+
+function ModeSelector({
+  theme,
+  value,
+  onChange,
+}: {
+  theme: SettingsTheme;
+  value: ReaderPreferences['readingMode'];
+  onChange: (value: ReaderPreferences['readingMode']) => void;
+}) {
+  return (
+    <View style={[styles.modeSelector, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}>
+      {(['scroll', 'page'] as const).map((mode) => {
+        const selected = value === mode;
+        return (
+          <M3Pressable
+            key={mode}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            feedback={selected ? 'subtle' : 'standard'}
+            onPress={() => onChange(mode)}
+            style={[styles.modeOption, selected && { backgroundColor: theme.surfaceSolid, borderColor: theme.accent }]}>
+            <Text style={[styles.modeOptionText, { color: selected ? theme.text : theme.muted }]}>{readingModeCopy[mode].title}</Text>
+          </M3Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function PreferenceStepper({
+  theme,
+  label,
+  value,
+  onMinus,
+  onPlus,
+}: {
+  theme: SettingsTheme;
+  label: string;
+  value: string;
+  onMinus: () => void;
+  onPlus: () => void;
+}) {
+  return (
+    <View style={[styles.preferenceStepper, { borderBottomColor: theme.line }]}>
+      <Text style={[styles.stepperLabel, { color: theme.text }]}>{label}</Text>
+      <View style={styles.stepperControls}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`减少${label}`}
+          hitSlop={8}
+          android_ripple={{ color: 'rgba(47, 107, 79, 0.16)', borderless: true, radius: 24 }}
+          style={({ pressed }) => [styles.stepperButton, { backgroundColor: theme.surfaceContainer }, pressed && styles.stepperButtonPressed]}
+          onPress={onMinus}>
+          <Text style={[styles.stepperButtonText, { color: theme.accent }]}>-</Text>
+        </Pressable>
+        <Text style={[styles.stepperValue, { color: theme.text }]}>{value}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`增加${label}`}
+          hitSlop={8}
+          android_ripple={{ color: 'rgba(47, 107, 79, 0.16)', borderless: true, radius: 24 }}
+          style={({ pressed }) => [styles.stepperButton, { backgroundColor: theme.surfaceContainer }, pressed && styles.stepperButtonPressed]}
+          onPress={onPlus}>
+          <Text style={[styles.stepperButtonText, { color: theme.accent }]}>+</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -292,67 +374,139 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 44,
-    paddingBottom: 42,
-    gap: 18,
+    flexGrow: 1,
+    paddingHorizontal: 28,
+    paddingBottom: 96,
+    gap: 24,
   },
   contentWide: {
     width: '100%',
-    maxWidth: 760,
+    maxWidth: 560,
     alignSelf: 'center',
   },
-  headerBackButton: {
+  navBar: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    zIndex: 10,
+    borderBottomWidth: 1,
+    justifyContent: 'center',
+  },
+  backButton: {
+    marginLeft: 4,
     width: 48,
-    minWidth: 48,
-    paddingHorizontal: 0,
-  },
-  headerMeta: {
-    color: brand.chrome.accentText,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  saveBadge: {
-    minHeight: 34,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    backgroundColor: brand.chrome.accent,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
   },
-  settingsSectionSurface: {
-    padding: 10,
-    gap: 10,
+  backButtonPressed: {
+    opacity: 0.68,
   },
-  choiceList: {
-    gap: 8,
+  backButtonIcon: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  choiceGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  backButtonGlyph: {
+    marginLeft: -2,
+    marginTop: -2,
+    fontSize: 38,
+    lineHeight: 38,
+    fontWeight: '500',
+    letterSpacing: 0,
   },
-  choiceRow: {
-    minHeight: 60,
-    borderRadius: brand.radius.medium,
+  navTitle: {
+    position: 'absolute',
+    left: 88,
+    right: 88,
+    bottom: 16,
+    textAlign: 'center',
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  saveStatus: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  loadingPanel: {
+    minHeight: 220,
+    borderRadius: 24,
     borderCurve: 'continuous',
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  intro: {
+    minHeight: 42,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    justifyContent: 'space-between',
+    gap: 16,
   },
-  choiceRowCompact: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    minHeight: 64,
+  screenMeta: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  settingGroup: {
+    gap: 8,
+  },
+  settingHeader: {
+    minHeight: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  settingTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  settingValue: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  settingSurface: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  choiceRow: {
+    minHeight: 62,
+    borderRadius: 0,
+    borderCurve: 'continuous',
+    borderWidth: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
   },
   choiceIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: brand.radius.small,
+    width: 34,
+    height: 34,
+    borderRadius: 11,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
@@ -365,7 +519,8 @@ const styles = StyleSheet.create({
   choiceTitle: {
     color: brand.colors.ink,
     fontSize: 15,
-    fontWeight: '900',
+    lineHeight: 21,
+    fontWeight: '800',
     letterSpacing: 0,
   },
   choiceDetail: {
@@ -380,19 +535,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   choiceSwatchDot: {
-    width: 13,
+    width: 12,
     height: 22,
     borderRadius: brand.radius.round,
     borderCurve: 'continuous',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  modeSelector: {
+    minHeight: 46,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 6,
+    padding: 4,
+    marginVertical: 10,
+  },
+  modeOption: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 11,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeOptionText: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '800',
+    letterSpacing: 0,
   },
   readerPreview: {
-    minHeight: 144,
-    borderRadius: brand.radius.large,
+    minHeight: 96,
+    borderRadius: 16,
     borderCurve: 'continuous',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: 14,
-    gap: 10,
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
     overflow: 'hidden',
   },
   readerPreviewMeta: {
@@ -402,12 +585,14 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   readerPreviewKicker: {
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '900',
     letterSpacing: 0,
   },
   readerPreviewMode: {
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '800',
     letterSpacing: 0,
   },
@@ -416,6 +601,51 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   stepperStack: {
-    gap: 8,
+    paddingTop: 0,
+  },
+  preferenceStepper: {
+    minHeight: 62,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  stepperLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  stepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stepperButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperButtonPressed: {
+    opacity: 0.72,
+  },
+  stepperButtonText: {
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  stepperValue: {
+    minWidth: 38,
+    textAlign: 'center',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+    letterSpacing: 0,
   },
 });

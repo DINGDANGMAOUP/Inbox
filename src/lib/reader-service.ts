@@ -1,8 +1,16 @@
-import { Directory, File, Paths } from 'expo-file-system';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import { Directory, File, Paths } from "expo-file-system";
+import type { SQLiteDatabase } from "expo-sqlite";
 
-import { parseEpub, type ParsedBook } from '@/lib/epub-parser';
-import { cleanChapterTitle, excerptAround, hashBytes, makeId, safeFileName, splitTxtIntoChapters, wordCount } from '@/lib/text-utils';
+import { parseEpub, type ParsedBook } from "@/lib/epub-parser";
+import {
+  cleanChapterTitle,
+  excerptAround,
+  hashBytes,
+  makeId,
+  safeFileName,
+  splitTxtIntoChapters,
+  wordCount,
+} from "@/lib/text-utils";
 import type {
   Annotation,
   AnnotationType,
@@ -13,13 +21,13 @@ import type {
   ReaderPreferences,
   ReaderTheme,
   SearchResult,
-} from '@/types/reader';
+} from "@/types/reader";
 
 type BookRow = {
   id: string;
   title: string;
   author: string;
-  format: 'epub' | 'txt';
+  format: "epub" | "txt";
   file_uri: string;
   cover_uri: string | null;
   imported_at: string;
@@ -55,33 +63,40 @@ type AnnotationRow = {
   updated_at: string;
 };
 
-const readerDirectory = new Directory(Paths.document, 'inbox-reader');
+const readerDirectory = new Directory(Paths.document, "inbox-reader");
 
 function normalizeAppThemeMode(theme?: string | null): AppThemeMode {
-  if (theme === 'system' || theme === 'mist' || theme === 'deep') {
+  if (theme === "system" || theme === "mist" || theme === "deep") {
     return theme;
   }
-  if (theme === 'ink') {
-    return 'deep';
+  if (theme === "ink") {
+    return "deep";
   }
-  return 'system';
+  return "system";
 }
 
 function normalizeReaderTheme(theme?: string | null): ReaderTheme {
-  if (theme === 'paper' || theme === 'sepia' || theme === 'night' || theme === 'eink') {
+  if (
+    theme === "paper" ||
+    theme === "sepia" ||
+    theme === "night" ||
+    theme === "eink"
+  ) {
     return theme;
   }
-  if (theme === 'deep' || theme === 'ink') {
-    return 'night';
+  if (theme === "deep" || theme === "ink") {
+    return "night";
   }
-  if (theme === 'sage') {
-    return 'paper';
+  if (theme === "sage") {
+    return "paper";
   }
-  return 'paper';
+  return "paper";
 }
 
-function normalizeReadingMode(mode?: string | null): ReaderPreferences['readingMode'] {
-  return mode === 'page' ? 'page' : 'scroll';
+function normalizeReadingMode(
+  mode?: string | null,
+): ReaderPreferences["readingMode"] {
+  return mode === "page" ? "page" : "scroll";
 }
 
 function mapBook(row: BookRow): Book {
@@ -140,10 +155,13 @@ function ensureReaderDirectory() {
   readerDirectory.create({ idempotent: true, intermediates: true });
 }
 
-async function copyPickedFileToPrivateFile(pickedFile: File, originalName: string) {
+async function copyPickedFileToPrivateFile(
+  pickedFile: File,
+  originalName: string,
+) {
   ensureReaderDirectory();
 
-  const tempDir = new Directory(readerDirectory, `import-${makeId('tmp')}`);
+  const tempDir = new Directory(readerDirectory, `import-${makeId("tmp")}`);
   tempDir.create({ idempotent: true, intermediates: true });
 
   const tempFile = new File(tempDir, safeFileName(originalName));
@@ -154,7 +172,12 @@ async function copyPickedFileToPrivateFile(pickedFile: File, originalName: strin
   return { tempDir, tempFile, bytes };
 }
 
-async function writeParsedBookFiles(parsed: ParsedBook, importedFile: File, originalName: string, id: string) {
+async function writeParsedBookFiles(
+  parsed: ParsedBook,
+  importedFile: File,
+  originalName: string,
+  id: string,
+) {
   const bookDir = new Directory(readerDirectory, id);
   bookDir.create({ idempotent: true, intermediates: true });
 
@@ -163,7 +186,13 @@ async function writeParsedBookFiles(parsed: ParsedBook, importedFile: File, orig
   await importedFile.copy(storedFile, { overwrite: true });
 
   const chapters = parsed.chapters.map((chapter, index) => {
-    const htmlPath = parsed.format === 'epub' ? new File(bookDir, `chapter-${String(index + 1).padStart(4, '0')}.html`) : null;
+    const htmlPath =
+      parsed.format === "epub"
+        ? new File(
+            bookDir,
+            `chapter-${String(index + 1).padStart(4, "0")}.html`,
+          )
+        : null;
 
     if (htmlPath) {
       htmlPath.create({ overwrite: true, intermediates: true });
@@ -184,37 +213,50 @@ async function writeParsedBookFiles(parsed: ParsedBook, importedFile: File, orig
   };
 }
 
-async function parseTxt(source: File, fallbackName: string): Promise<ParsedBook> {
+async function parseTxt(
+  source: File,
+  fallbackName: string,
+): Promise<ParsedBook> {
   const text = await source.text();
-  const fallbackTitle = fallbackName.replace(/\.(txt|text)$/i, '').trim();
+  const fallbackTitle = fallbackName.replace(/\.(txt|text)$/i, "").trim();
   const firstTextTitle = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  const titleLooksLikeProviderId = /^(msf|raw|document):?\d+$/i.test(fallbackTitle) || !/[a-z0-9\u4e00-\u9fff]/i.test(fallbackTitle);
-  const normalizedFirstTitle = cleanChapterTitle(firstTextTitle, '');
-  const title = titleLooksLikeProviderId && normalizedFirstTitle ? normalizedFirstTitle.slice(0, 80) : fallbackTitle || '未命名文本';
+  const titleLooksLikeProviderId =
+    /^(msf|raw|document):?\d+$/i.test(fallbackTitle) ||
+    !/[a-z0-9\u4e00-\u9fff]/i.test(fallbackTitle);
+  const normalizedFirstTitle = cleanChapterTitle(firstTextTitle, "");
+  const title =
+    titleLooksLikeProviderId && normalizedFirstTitle
+      ? normalizedFirstTitle.slice(0, 80)
+      : fallbackTitle || "未命名文本";
   const chapters = splitTxtIntoChapters(text).map((chapter, index) => ({
-    id: makeId('chapter'),
+    id: makeId("chapter"),
     href: `txt:${index}`,
     title: chapter.title,
     order: index,
-    html: '',
+    html: "",
     text: chapter.text,
     wordCount: wordCount(chapter.text),
   }));
 
   return {
     title,
-    author: '本地文件',
-    format: 'txt',
+    author: "本地文件",
+    format: "txt",
     chapters,
   };
 }
 
 export async function importBook(db: SQLiteDatabase) {
   const result = await File.pickFileAsync({
-    mimeTypes: ['application/epub+zip', 'text/plain', 'text/*', 'application/octet-stream'],
+    mimeTypes: [
+      "application/epub+zip",
+      "text/plain",
+      "text/*",
+      "application/octet-stream",
+    ],
   });
 
   if (result.canceled || !result.result) {
@@ -222,30 +264,36 @@ export async function importBook(db: SQLiteDatabase) {
   }
 
   const pickedFile = result.result;
-  const originalName = pickedFile.name || 'book';
-  const extension = originalName.split('.').pop()?.toLowerCase();
+  const originalName = pickedFile.name || "book";
+  const extension = originalName.split(".").pop()?.toLowerCase();
   const mimeType = pickedFile.type.toLowerCase();
   const inferredFormat =
-    extension === 'epub' || mimeType === 'application/epub+zip'
-      ? 'epub'
-      : extension === 'txt' || mimeType.startsWith('text/')
-        ? 'txt'
+    extension === "epub" || mimeType === "application/epub+zip"
+      ? "epub"
+      : extension === "txt" || mimeType.startsWith("text/")
+        ? "txt"
         : null;
 
   if (!inferredFormat) {
-    throw new Error('当前版本仅支持 EPUB 和 TXT 文件。');
+    throw new Error("当前版本仅支持 EPUB 和 TXT 文件。");
   }
 
-  const { tempDir, tempFile, bytes } = await copyPickedFileToPrivateFile(pickedFile, originalName);
+  const { tempDir, tempFile, bytes } = await copyPickedFileToPrivateFile(
+    pickedFile,
+    originalName,
+  );
   const contentHash = hashBytes(bytes);
   const id = `book_${contentHash}`;
-  const parsed = inferredFormat === 'epub' ? parseEpub(bytes, originalName) : await parseTxt(tempFile, originalName);
+  const parsed =
+    inferredFormat === "epub"
+      ? parseEpub(bytes, originalName)
+      : await parseTxt(tempFile, originalName);
   const now = new Date().toISOString();
 
   const existing = await db.getFirstAsync<{ id: string }>(
-    'SELECT id FROM books WHERE id = ? OR id LIKE ? ORDER BY imported_at ASC LIMIT 1',
+    "SELECT id FROM books WHERE id = ? OR id LIKE ? ORDER BY imported_at ASC LIMIT 1",
     id,
-    `${id}_%`
+    `${id}_%`,
   );
   if (existing) {
     if (tempDir.exists) {
@@ -271,7 +319,7 @@ export async function importBook(db: SQLiteDatabase) {
       null,
       now,
       null,
-      stored.chapters.length
+      stored.chapters.length,
     );
 
     for (const chapter of stored.chapters) {
@@ -285,7 +333,7 @@ export async function importBook(db: SQLiteDatabase) {
         chapter.order,
         chapter.htmlPath,
         chapter.text,
-        chapter.wordCount
+        chapter.wordCount,
       );
 
       await db.runAsync(
@@ -294,7 +342,7 @@ export async function importBook(db: SQLiteDatabase) {
         stored.id,
         chapter.id,
         chapter.title,
-        chapter.text
+        chapter.text,
       );
     }
   });
@@ -312,41 +360,55 @@ export async function listBooks(db: SQLiteDatabase) {
        FROM books b
        LEFT JOIN reading_progress p ON p.book_id = b.id
        LEFT JOIN chapters c ON c.id = p.chapter_id
-      ORDER BY COALESCE(b.last_opened_at, b.imported_at) DESC`
+      ORDER BY COALESCE(b.last_opened_at, b.imported_at) DESC`,
   );
 
   return rows.map(mapLibraryBook);
 }
 
 export async function getBook(db: SQLiteDatabase, id: string) {
-  const row = await db.getFirstAsync<BookRow>('SELECT * FROM books WHERE id = ?', id);
+  const row = await db.getFirstAsync<BookRow>(
+    "SELECT * FROM books WHERE id = ?",
+    id,
+  );
   return row ? mapBook(row) : null;
 }
 
 export async function getChapters(db: SQLiteDatabase, bookId: string) {
   const rows = await db.getAllAsync<ChapterRow>(
-    'SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_order ASC',
-    bookId
+    "SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_order ASC",
+    bookId,
   );
   return rows.map(mapChapter);
 }
 
 export async function getProgress(db: SQLiteDatabase, bookId: string) {
-  return db.getFirstAsync<{ book_id: string; chapter_id: string; scroll_ratio: number; updated_at: string }>(
-    'SELECT * FROM reading_progress WHERE book_id = ?',
-    bookId
-  );
+  return db.getFirstAsync<{
+    book_id: string;
+    chapter_id: string;
+    scroll_ratio: number;
+    updated_at: string;
+  }>("SELECT * FROM reading_progress WHERE book_id = ?", bookId);
 }
 
 export async function openBook(db: SQLiteDatabase, bookId: string) {
-  await db.runAsync('UPDATE books SET last_opened_at = ? WHERE id = ?', new Date().toISOString(), bookId);
+  await db.runAsync(
+    "UPDATE books SET last_opened_at = ? WHERE id = ?",
+    new Date().toISOString(),
+    bookId,
+  );
   const book = await getBook(db, bookId);
   const chapters = await getChapters(db, bookId);
   const progress = await getProgress(db, bookId);
   return { book, chapters, progress };
 }
 
-export async function saveProgress(db: SQLiteDatabase, bookId: string, chapterId: string, scrollRatio: number) {
+export async function saveProgress(
+  db: SQLiteDatabase,
+  bookId: string,
+  chapterId: string,
+  scrollRatio: number,
+) {
   const now = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO reading_progress (book_id, chapter_id, scroll_ratio, updated_at)
@@ -358,25 +420,37 @@ export async function saveProgress(db: SQLiteDatabase, bookId: string, chapterId
     bookId,
     chapterId,
     Math.max(0, Math.min(1, scrollRatio)),
-    now
+    now,
   );
-  await db.runAsync('UPDATE books SET last_opened_at = ? WHERE id = ?', now, bookId);
+  await db.runAsync(
+    "UPDATE books SET last_opened_at = ? WHERE id = ?",
+    now,
+    bookId,
+  );
 }
 
-export async function searchBook(db: SQLiteDatabase, bookId: string, query: string): Promise<SearchResult[]> {
+export async function searchBook(
+  db: SQLiteDatabase,
+  bookId: string,
+  query: string,
+): Promise<SearchResult[]> {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) {
     return [];
   }
 
-  const rows = await db.getAllAsync<{ chapter_id: string; chapter_title: string; content: string }>(
+  const rows = await db.getAllAsync<{
+    chapter_id: string;
+    chapter_title: string;
+    content: string;
+  }>(
     `SELECT chapter_id, chapter_title, content
        FROM search_index
       WHERE book_id = ? AND lower(content) LIKE ?
       ORDER BY chapter_title ASC
       LIMIT 40`,
     bookId,
-    `%${trimmed}%`
+    `%${trimmed}%`,
   );
 
   return rows.map((row) => {
@@ -392,8 +466,8 @@ export async function searchBook(db: SQLiteDatabase, bookId: string, query: stri
 
 export async function listAnnotations(db: SQLiteDatabase, bookId: string) {
   const rows = await db.getAllAsync<AnnotationRow>(
-    'SELECT * FROM annotations WHERE book_id = ? ORDER BY updated_at DESC',
-    bookId
+    "SELECT * FROM annotations WHERE book_id = ? ORDER BY updated_at DESC",
+    bookId,
   );
   return rows.map(mapAnnotation);
 }
@@ -408,7 +482,7 @@ export async function createAnnotation(
     noteText?: string | null;
     color?: string | null;
     position?: string;
-  }
+  },
 ) {
   const now = new Date().toISOString();
   const id = makeId(input.type);
@@ -425,17 +499,19 @@ export async function createAnnotation(
     input.color ?? null,
     input.position ?? JSON.stringify({ chapterId: input.chapterId }),
     now,
-    now
+    now,
   );
 
   return id;
 }
 
 export async function deleteAnnotation(db: SQLiteDatabase, id: string) {
-  await db.runAsync('DELETE FROM annotations WHERE id = ?', id);
+  await db.runAsync("DELETE FROM annotations WHERE id = ?", id);
 }
 
-export async function getReaderPreferences(db: SQLiteDatabase): Promise<ReaderPreferences> {
+export async function getReaderPreferences(
+  db: SQLiteDatabase,
+): Promise<ReaderPreferences> {
   const row = await db.getFirstAsync<{
     theme: string;
     app_theme_mode: string | null;
@@ -444,7 +520,10 @@ export async function getReaderPreferences(db: SQLiteDatabase): Promise<ReaderPr
     line_height: number;
     margin: number;
     reading_mode: string | null;
-  }>('SELECT theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?', 'default');
+  }>(
+    "SELECT theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?",
+    "default",
+  );
 
   return {
     appThemeMode: normalizeAppThemeMode(row?.app_theme_mode ?? row?.theme),
@@ -456,7 +535,10 @@ export async function getReaderPreferences(db: SQLiteDatabase): Promise<ReaderPr
   };
 }
 
-export async function updateReaderPreferences(db: SQLiteDatabase, preferences: ReaderPreferences) {
+export async function updateReaderPreferences(
+  db: SQLiteDatabase,
+  preferences: ReaderPreferences,
+) {
   await db.runAsync(
     `INSERT INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode)
      VALUES ('default', ?, ?, ?, ?, ?, ?, ?)
@@ -468,23 +550,23 @@ export async function updateReaderPreferences(db: SQLiteDatabase, preferences: R
        line_height = excluded.line_height,
        margin = excluded.margin,
        reading_mode = excluded.reading_mode`,
-    preferences.appThemeMode === 'deep' ? 'deep' : 'mist',
+    preferences.appThemeMode === "deep" ? "deep" : "mist",
     preferences.appThemeMode,
     preferences.readerTheme,
     preferences.fontSize,
     preferences.lineHeight,
     preferences.margin,
-    preferences.readingMode
+    preferences.readingMode,
   );
 }
 
 export async function deleteBook(db: SQLiteDatabase, bookId: string) {
   await db.withTransactionAsync(async () => {
-    await db.runAsync('DELETE FROM annotations WHERE book_id = ?', bookId);
-    await db.runAsync('DELETE FROM search_index WHERE book_id = ?', bookId);
-    await db.runAsync('DELETE FROM reading_progress WHERE book_id = ?', bookId);
-    await db.runAsync('DELETE FROM chapters WHERE book_id = ?', bookId);
-    await db.runAsync('DELETE FROM books WHERE id = ?', bookId);
+    await db.runAsync("DELETE FROM annotations WHERE book_id = ?", bookId);
+    await db.runAsync("DELETE FROM search_index WHERE book_id = ?", bookId);
+    await db.runAsync("DELETE FROM reading_progress WHERE book_id = ?", bookId);
+    await db.runAsync("DELETE FROM chapters WHERE book_id = ?", bookId);
+    await db.runAsync("DELETE FROM books WHERE id = ?", bookId);
   });
 
   const bookDir = new Directory(readerDirectory, bookId);

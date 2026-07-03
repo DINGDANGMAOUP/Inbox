@@ -1,165 +1,151 @@
-import { Image } from 'expo-image';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import Animated from 'react-native-reanimated';
+import { Image } from "expo-image";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  BackHandler,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import Animated from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { IconButton } from '@/components/reader/icon-button';
-import { M3InfoRow, M3ProgressRail, M3Screen, M3Section, M3TopAppBar } from '@/components/reader/m3';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
-import { m3Motion } from '@/components/reader/motion-presets';
-import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
-import { brandAssets } from '@/constants/brand-assets';
-import { brand } from '@/constants/brand';
-import { motion } from '@/constants/motion';
-import { appThemeAssets } from '@/constants/theme-assets';
-import { useReaderPreferences } from '@/hooks/use-reader-preferences';
+import { M3Screen } from "@/components/reader/m3";
+import { M3Pressable } from "@/components/reader/m3-pressable";
+import {
+  MaterialSymbol,
+  type MaterialSymbolName,
+} from "@/components/reader/material-symbol";
+import { useRouteSlideTransition } from "@/components/reader/route-slide-transition";
+import { brandAssets } from "@/constants/brand-assets";
+import { brand } from "@/constants/brand";
+import { appThemeAssets } from "@/constants/theme-assets";
+import { useReaderPreferences } from "@/hooks/use-reader-preferences";
 import {
   checkForGithubAppUpdate,
-  downloadGithubApk,
   getInstalledAppVersion,
-  getUpdateSourceInfo,
-  installDownloadedApk,
   openReleasePage,
-  type RemoteAppVersion,
-} from '@/lib/app-update-service';
+} from "@/lib/app-update-service";
 
 type UpdatePhase =
-  | 'idle'
-  | 'checking'
-  | 'current'
-  | 'available'
-  | 'downloading'
-  | 'downloaded'
-  | 'installing'
-  | 'unavailable'
-  | 'error'
-  | 'unsupported';
+  "idle" | "checking" | "current" | "available" | "unavailable" | "error";
+
 type AboutTheme = (typeof brand.appThemes)[keyof typeof brand.appThemes];
 
 export default function AboutScreen() {
   const { resolvedAppTheme } = useReaderPreferences();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { closeRoute, routeStyle } = useRouteSlideTransition(width);
   const theme = brand.appThemes[resolvedAppTheme];
   const installedVersion = useMemo(() => getInstalledAppVersion(), []);
-  const updateSource = useMemo(() => getUpdateSourceInfo(), []);
-  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>('idle');
-  const [updateMessage, setUpdateMessage] = useState('查看当前版本，按需检查内测更新。');
-  const [remoteUpdate, setRemoteUpdate] = useState<RemoteAppVersion | undefined>();
-  const [downloadedApkUri, setDownloadedApkUri] = useState<string | undefined>();
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [downloadBytes, setDownloadBytes] = useState({ written: 0, total: 0 });
+  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
+  const [updateMessage, setUpdateMessage] = useState("检查 GitHub Releases");
   const [lastCheckedAt, setLastCheckedAt] = useState<string | undefined>();
-  const isDeepTheme = resolvedAppTheme === 'deep';
-  const headerTheme = {
-    ...theme,
-    surface: theme.surfaceSolid,
-    surfaceSolid: theme.surfaceSolid,
-    surfaceContainer: theme.surfaceContainer,
-    surfaceContainerHigh: theme.surfaceContainerHigh,
-    primaryContainer: theme.primaryContainer,
-    onPrimaryContainer: theme.onPrimaryContainer,
-  };
+  const isDeepTheme = resolvedAppTheme === "deep";
+  const topBarHeight = insets.top + 56;
+
   const handleBack = useCallback(() => {
     closeRoute();
   }, [closeRoute]);
 
   useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      handleBack();
-      return true;
-    });
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        handleBack();
+        return true;
+      },
+    );
     return () => subscription.remove();
   }, [handleBack]);
 
   const checkUpdate = useCallback(async () => {
-    setUpdatePhase('checking');
-    setDownloadedApkUri(undefined);
-    setDownloadProgress(0);
-    setDownloadBytes({ written: 0, total: 0 });
+    if (updatePhase === "checking") {
+      return;
+    }
+
+    setUpdatePhase("checking");
+    setUpdateMessage("正在检查 GitHub Releases");
     try {
       const result = await checkForGithubAppUpdate();
       setLastCheckedAt(new Date().toISOString());
       setUpdateMessage(result.message);
 
-      if (result.status === 'error' && result.message.startsWith('暂未')) {
-        setRemoteUpdate(undefined);
-        setUpdatePhase('current');
+      if (
+        result.status === "error" &&
+        result.message.startsWith("暂未发布正式版本")
+      ) {
+        setUpdatePhase("current");
+        setUpdateMessage("暂无正式版本");
+        Alert.alert("暂无正式版本", "当前仓库还没有发布正式 Release。");
         return;
       }
 
-      if (result.status === 'error' && isUpdateSourceUnavailable(result.message)) {
-        setRemoteUpdate(undefined);
-        setUpdatePhase('unavailable');
-        setUpdateMessage('更新源暂时无法访问，可稍后重试或查看内测页面。');
+      if (
+        result.status === "error" &&
+        isUpdateSourceUnavailable(result.message)
+      ) {
+        setUpdatePhase("unavailable");
+        setUpdateMessage("暂时无法访问 Releases");
+        Alert.alert("检查失败", "暂时无法访问 GitHub Releases，可稍后再试。");
         return;
       }
 
-      if (result.status === 'available') {
-        setRemoteUpdate(result.remote);
-        setUpdatePhase('available');
+      if (result.status === "error") {
+        setUpdatePhase("error");
+        Alert.alert("检查失败", result.message);
         return;
       }
 
-      setRemoteUpdate(result.status === 'current' ? result.remote : undefined);
-      setUpdatePhase(result.status);
+      if (result.status === "current") {
+        setUpdatePhase("current");
+        Alert.alert(
+          "已是最新版本",
+          `当前版本 Version ${result.current.version}`,
+        );
+        return;
+      }
+
+      if (result.status === "available") {
+        setUpdatePhase("available");
+        Alert.alert(
+          "发现新版本",
+          `最新版本 Version ${result.remote.version}\n\n${result.remote.releaseNotes}`,
+          [
+            { text: "稍后", style: "cancel" },
+            {
+              text: "查看 Releases",
+              onPress: () => openReleasePage(result.remote),
+            },
+          ],
+        );
+        return;
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '检查内测更新失败。';
-      if (message.startsWith('暂未')) {
-        setRemoteUpdate(undefined);
-        setUpdatePhase('current');
-        setUpdateMessage(message);
-        return;
-      }
+      const message =
+        error instanceof Error ? error.message : "检查 Releases 失败。";
       if (isUpdateSourceUnavailable(message)) {
-        setRemoteUpdate(undefined);
-        setUpdatePhase('unavailable');
-        setUpdateMessage('更新源暂时无法访问，可稍后重试或查看内测页面。');
+        setUpdatePhase("unavailable");
+        setUpdateMessage("暂时无法访问 Releases");
+        Alert.alert("检查失败", "暂时无法访问 GitHub Releases，可稍后再试。");
         return;
       }
-      setUpdatePhase('error');
+      setUpdatePhase("error");
       setUpdateMessage(message);
+      Alert.alert("检查失败", message);
     }
-  }, []);
-
-  const downloadUpdate = useCallback(async () => {
-    if (!remoteUpdate) {
-      return;
-    }
-
-    setUpdatePhase('downloading');
-    setUpdateMessage('正在下载');
-    try {
-      const file = await downloadGithubApk(remoteUpdate, (progress, written, total) => {
-        setDownloadProgress(progress);
-        setDownloadBytes({ written, total });
-      });
-      setDownloadedApkUri(file.uri);
-      setDownloadProgress(1);
-      setUpdatePhase('downloaded');
-      setUpdateMessage('下载完成，可以打开 Android 安装器。');
-    } catch (error) {
-      setUpdatePhase('error');
-      setUpdateMessage(error instanceof Error ? error.message : '下载内测失败。');
-    }
-  }, [remoteUpdate]);
-
-  const installUpdate = useCallback(async () => {
-    if (!downloadedApkUri) {
-      return;
-    }
-
-    setUpdatePhase('installing');
-    setUpdateMessage('正在打开安装器');
-    try {
-      await installDownloadedApk(downloadedApkUri);
-      setUpdatePhase('downloaded');
-    } catch (error) {
-      setUpdatePhase('error');
-      setUpdateMessage(error instanceof Error ? error.message : '无法打开安装器。');
-    }
-  }, [downloadedApkUri]);
+  }, [updatePhase]);
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
@@ -167,376 +153,279 @@ export default function AboutScreen() {
         key={`about-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
-        overlayColor={isDeepTheme ? 'rgba(8, 9, 6, 0.36)' : 'rgba(247, 243, 234, 0.78)'}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
-        <M3TopAppBar
-          theme={headerTheme}
-          title="关于"
-          subtitle="墨屿 Inbox"
-          leading={
-            <IconButton
-              icon="chevron.left"
-              label="返回"
-              tone="quiet"
-              tintColor={theme.text}
-              size="icon"
-              style={{ backgroundColor: theme.surfaceContainer, borderColor: theme.line }}
-              onPress={handleBack}
+        overlayColor={
+          isDeepTheme ? "rgba(8, 9, 6, 0.46)" : "rgba(250, 248, 242, 0.93)"
+        }
+      >
+        <View
+          style={[
+            styles.navBar,
+            { height: topBarHeight, paddingTop: insets.top },
+          ]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="返回"
+            hitSlop={16}
+            pressRetentionOffset={18}
+            android_ripple={{
+              color: "rgba(47, 107, 79, 0.14)",
+              borderless: true,
+              radius: 28,
+            }}
+            style={({ pressed }) => [
+              styles.backButton,
+              pressed && styles.backButtonPressed,
+            ]}
+            onPress={handleBack}
+          >
+            <View pointerEvents="none" style={styles.backButtonIcon}>
+              <Text style={[styles.backButtonGlyph, { color: theme.text }]}>
+                ‹
+              </Text>
+            </View>
+          </Pressable>
+          <Text
+            pointerEvents="none"
+            numberOfLines={1}
+            style={[styles.navTitle, { color: theme.text }]}
+          >
+            关于墨屿
+          </Text>
+        </View>
+        <ScrollView
+          contentInsetAdjustmentBehavior="never"
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: topBarHeight + 32 },
+            width >= 700 && styles.contentWide,
+          ]}
+        >
+          <View style={styles.identity}>
+            <View
+              style={[
+                styles.logoPlate,
+                {
+                  backgroundColor: theme.surfaceSolid,
+                  borderColor: theme.line,
+                },
+              ]}
+            >
+              <Image
+                source={brandAssets.logoMark}
+                contentFit="cover"
+                style={styles.logo}
+              />
+            </View>
+            <Text style={[styles.appName, { color: theme.text }]}>墨屿</Text>
+            <Text style={[styles.versionText, { color: theme.muted }]}>
+              Version {installedVersion.version}
+            </Text>
+          </View>
+
+          <View style={[styles.menuGroup, { borderTopColor: theme.line }]}>
+            <AboutMenuRow
+              theme={theme}
+              title="功能介绍"
+              detail="本地书架、EPUB / TXT、长读设置"
+              icon="info"
+              onPress={() =>
+                Alert.alert(
+                  "功能介绍",
+                  "墨屿是一个本地优先的阅读器，支持 EPUB 与 TXT，并保留主题、字号、行距和阅读记录。",
+                )
+              }
             />
-          }
-          trailing={
-            <View style={styles.versionPill}>
-              <Text style={styles.versionPillText}>v{installedVersion.version} 内测</Text>
-            </View>
-          }
-        />
-
-        <Animated.View
-          entering={m3Motion.fadeDown(motion.stagger.section)}
-          layout={m3Motion.layoutMedium()}
-          style={styles.hero}>
-          <View style={styles.heroBrandRow}>
-            <View style={styles.heroLogoSeal}>
-              <Image source={brandAssets.logoMark} contentFit="cover" style={styles.heroLogo} />
-            </View>
-            <View style={styles.heroCopy}>
-              <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
-              <Text style={styles.title}>墨屿</Text>
-              <Text style={styles.subtitle}>安静、离线、适合长读的本地书库。</Text>
-            </View>
+            <AboutMenuRow
+              theme={theme}
+              title="问题反馈"
+              detail="反馈使用问题或改进建议"
+              icon="note"
+              onPress={() =>
+                Alert.alert(
+                  "问题反馈",
+                  "可以在 GitHub Releases 或项目反馈渠道提交问题与建议。",
+                )
+              }
+            />
+            <AboutMenuRow
+              theme={theme}
+              title="检查更新"
+              detail={updateRowDetail(
+                updatePhase,
+                updateMessage,
+                lastCheckedAt,
+              )}
+              icon={updatePhaseIcon(updatePhase)}
+              disabled={updatePhase === "checking"}
+              onPress={checkUpdate}
+              trailing={
+                updatePhase === "checking" ? (
+                  <ActivityIndicator color={theme.accent} />
+                ) : undefined
+              }
+            />
           </View>
-          <View style={styles.heroDivider} />
-          <View style={styles.heroPills}>
-            <AboutPill icon="bookmark" label="本地书库" />
-            <AboutPill icon="textformat.size" label="长读友好" />
-            <AboutPill icon="tray.and.arrow.down" label="EPUB / TXT" />
+
+          <View style={styles.footer}>
+            <Text style={[styles.footerLink, { color: theme.accent }]}>
+              本地优先 · 私密保存 · 长读友好
+            </Text>
+            <Text style={[styles.footerText, { color: theme.muted }]}>
+              支持 EPUB / TXT
+            </Text>
+            <Text style={[styles.footerText, { color: theme.muted }]}>
+              运行环境：
+              {executionEnvironmentLabel(String(installedVersion.environment))}
+            </Text>
+            <Text style={[styles.footerText, { color: theme.muted }]}>
+              Copyright © 2026 墨屿 Inbox
+            </Text>
           </View>
-        </Animated.View>
-
-        <Animated.View entering={m3Motion.fadeDown(motion.stagger.section * 2)} style={styles.promiseGrid}>
-          <AboutPrinciple theme={theme} icon="bookmark" title="本地优先" body="书籍与阅读记录保存在这台设备。" />
-          <AboutPrinciple theme={theme} icon="textformat.size" title="长读友好" body="保留主题、字号、行距和翻页偏好。" />
-          <AboutPrinciple theme={theme} icon="check.circle" title="轻量安静" body="不做账号系统，也不把书城放进阅读动线。" />
-        </Animated.View>
-
-        <M3Section theme={theme} title="版本更新" kicker={updateSectionKicker(updatePhase)} order={3} contentStyle={styles.updateSectionSurface}>
-          <UpdatePanel
-            theme={theme}
-            phase={updatePhase}
-            message={updateMessage}
-            sourceLabel={updateSource.label}
-            installedVersion={installedVersion.version}
-            installedBuild={installedVersion.buildNumber}
-            remoteUpdate={remoteUpdate}
-            progress={downloadProgress}
-            bytes={downloadBytes}
-            lastCheckedAt={lastCheckedAt}
-            onCheck={checkUpdate}
-            onDownload={downloadUpdate}
-            onInstall={installUpdate}
-            onOpenRelease={() => openReleasePage(remoteUpdate)}
-          />
-        </M3Section>
-
-        <M3Section theme={theme} title="产品信息" order={4} contentStyle={styles.infoSectionSurface}>
-          <M3InfoRow theme={theme} title="产品名" value="墨屿" icon="info" />
-          <M3InfoRow theme={theme} title="英文名" value="Inbox" icon="info" />
-          <M3InfoRow theme={theme} title="阶段" value="开发内测" icon="check.circle" />
-          <M3InfoRow theme={theme} title="版本" value={`${installedVersion.version} (${installedVersion.buildNumber || '开发'})`} icon="check.circle" />
-          <M3InfoRow theme={theme} title="运行环境" value={executionEnvironmentLabel(String(installedVersion.environment))} icon="settings" />
-          <M3InfoRow theme={theme} title="支持格式" value="EPUB / TXT" icon="tray.and.arrow.down" />
-          <M3InfoRow theme={theme} title="更新渠道" value={updateSource.label} icon="download" />
-        </M3Section>
-
-        <M3Section theme={theme} title="数据" order={5} contentStyle={styles.infoSectionSurface}>
-          <M3InfoRow theme={theme} title="书籍" value="应用文档目录" icon="bookmark" />
-          <M3InfoRow theme={theme} title="阅读记录" value="本机数据库" icon="check.circle" />
-          <M3InfoRow theme={theme} title="账号" value="无" icon="info" />
-        </M3Section>
-      </ScrollView>
+        </ScrollView>
       </M3Screen>
     </Animated.View>
   );
 }
 
-function UpdatePanel({
+function AboutMenuRow({
   theme,
-  phase,
-  message,
-  sourceLabel,
-  installedVersion,
-  installedBuild,
-  remoteUpdate,
-  progress,
-  bytes,
-  lastCheckedAt,
-  onCheck,
-  onDownload,
-  onInstall,
-  onOpenRelease,
+  title,
+  detail,
+  icon,
+  disabled,
+  trailing,
+  onPress,
 }: {
   theme: AboutTheme;
-  phase: UpdatePhase;
-  message: string;
-  sourceLabel: string;
-  installedVersion: string;
-  installedBuild: number;
-  remoteUpdate?: RemoteAppVersion;
-  progress: number;
-  bytes: { written: number; total: number };
-  lastCheckedAt?: string;
-  onCheck: () => void;
-  onDownload: () => void;
-  onInstall: () => void;
-  onOpenRelease: () => void;
-}) {
-  const busy = phase === 'checking' || phase === 'downloading' || phase === 'installing';
-  const canDownload = phase === 'available' && Boolean(remoteUpdate);
-  const canInstall = phase === 'downloaded';
-  const primaryLabel = phase === 'checking' ? '检查中' : phase === 'downloading' ? '下载中' : phase === 'installing' ? '安装器' : canInstall ? '安装' : canDownload ? '下载更新' : '检查更新';
-  const primaryAction = canInstall ? onInstall : canDownload ? onDownload : onCheck;
-  const progressPercent = Math.round(progress * 100);
-
-  return (
-    <View style={styles.updatePanel}>
-      <View style={[styles.updateStatusCard, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}>
-        <View style={[styles.updateIconWell, { backgroundColor: updateIconBackground(theme, phase) }]}>
-          {busy ? (
-            <ActivityIndicator color={phase === 'checking' ? theme.accent : theme.accentText} />
-          ) : (
-            <MaterialSymbol name={updatePhaseIcon(phase)} color={updateIconColor(theme, phase)} description={updatePhaseTitle(phase)} decorative size={24} />
-          )}
-        </View>
-        <View style={styles.updateStatusCopy}>
-          <Text style={[styles.updateTitle, { color: theme.text }]}>{updatePhaseTitle(phase)}</Text>
-          <Text style={[styles.updateCaption, { color: theme.muted }]}>{message}</Text>
-        </View>
-      </View>
-
-      <View style={styles.versionGrid}>
-        <VersionMetric theme={theme} title="当前版本" value={`v${installedVersion}`} detail={installedBuild ? `Build ${installedBuild}` : '开发构建'} />
-        <VersionMetric theme={theme} title="更新渠道" value={sourceLabel} detail={lastCheckedAt ? `${formatCheckedAt(lastCheckedAt)} 检查` : '未检查'} />
-      </View>
-
-      {remoteUpdate ? (
-        <View style={[styles.releaseNoteBox, { backgroundColor: theme.surfaceContainerHigh, borderColor: theme.line }]}>
-          <View style={styles.releaseNoteHeader}>
-            <Text style={[styles.releaseNoteTitle, { color: theme.text }]}>{remoteUpdate.force ? '重要内测' : `内测 v${remoteUpdate.version}`}</Text>
-            <Text style={[styles.releaseNoteMeta, { color: theme.muted }]}>{remoteUpdate.apkSize ? formatBytes(remoteUpdate.apkSize) : '待获取大小'}</Text>
-          </View>
-          <Text style={[styles.releaseNoteText, { color: theme.muted }]} numberOfLines={3}>
-            {remoteUpdate.releaseNotes}
-          </Text>
-        </View>
-      ) : null}
-
-      {phase === 'downloading' || phase === 'downloaded' ? (
-        <M3ProgressRail
-          theme={theme}
-          label={phase === 'downloaded' ? '下载完成' : `下载进度 ${progressPercent}%`}
-          value={phase === 'downloaded' ? 1 : progress}
-          detail={formatDownloadProgress(bytes)}
-        />
-      ) : null}
-
-      <View style={styles.updateActions}>
-        <M3Pressable
-          disabled={busy}
-          onPress={primaryAction}
-          feedback="standard"
-          stateLayerColor="rgba(255, 255, 255, 0.18)"
-          style={[styles.updateButton, { backgroundColor: theme.accent }, busy && styles.disabledButton]}>
-          <MaterialSymbol name={updatePhaseIcon(phase)} color={theme.accentText} description={primaryLabel} decorative size={17} />
-          <Text style={[styles.updateButtonText, { color: theme.accentText }]}>{primaryLabel}</Text>
-        </M3Pressable>
-        <M3Pressable
-          onPress={onOpenRelease}
-          feedback="subtle"
-          style={[styles.secondaryButton, { backgroundColor: theme.surfaceContainerHigh, borderColor: theme.line }]}>
-          <MaterialSymbol name="info" color={theme.text} description="查看内测" decorative size={16} />
-          <Text style={[styles.secondaryButtonText, { color: theme.text }]}>查看内测</Text>
-        </M3Pressable>
-      </View>
-
-      <Text style={[styles.updateFinePrint, { color: theme.muted }]}>下载后由 Android 系统确认安装。</Text>
-    </View>
-  );
-}
-
-function VersionMetric({ theme, title, value, detail }: { theme: AboutTheme; title: string; value: string; detail: string }) {
-  return (
-    <View style={[styles.versionMetric, { backgroundColor: theme.surfaceContainerHigh, borderColor: theme.line }]}>
-      <Text style={[styles.versionMetricTitle, { color: theme.muted }]}>{title}</Text>
-      <Text numberOfLines={1} style={[styles.versionMetricValue, { color: theme.text }]}>
-        {value}
-      </Text>
-      <Text numberOfLines={1} style={[styles.versionMetricDetail, { color: theme.muted }]}>
-        {detail}
-      </Text>
-    </View>
-  );
-}
-
-function AboutPill({ icon, label }: { icon: MaterialSymbolName; label: string }) {
-  return (
-    <View style={styles.aboutPill}>
-      <MaterialSymbol name={icon} color={brand.colors.copper} description={label} decorative size={15} />
-      <Text style={styles.aboutPillText}>{label}</Text>
-    </View>
-  );
-}
-
-function AboutPrinciple({
-  theme,
-  icon,
-  title,
-  body,
-}: {
-  theme: typeof brand.appThemes[keyof typeof brand.appThemes];
-  icon: MaterialSymbolName;
   title: string;
-  body: string;
+  detail?: string;
+  icon: MaterialSymbolName;
+  disabled?: boolean;
+  trailing?: ReactNode;
+  onPress: () => void;
 }) {
   return (
-    <View style={[styles.principleCard, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-      <View style={[styles.principleIcon, { backgroundColor: theme.primaryContainer }]}>
-        <MaterialSymbol name={icon} color={theme.onPrimaryContainer} description={title} decorative size={17} />
+    <M3Pressable
+      disabled={disabled}
+      onPress={onPress}
+      feedback="subtle"
+      hitSlop={{ left: 4, right: 4 }}
+      style={[
+        styles.menuRow,
+        disabled && styles.disabledRow,
+        { borderBottomColor: theme.line },
+      ]}
+    >
+      <View
+        style={[styles.menuIcon, { backgroundColor: theme.primaryContainer }]}
+      >
+        <MaterialSymbol
+          name={icon}
+          color={theme.onPrimaryContainer}
+          description={title}
+          decorative
+          size={17}
+        />
       </View>
-      <View style={styles.principleCopy}>
-        <Text style={[styles.principleTitle, { color: theme.text }]}>{title}</Text>
-        <Text style={[styles.principleBody, { color: theme.muted }]}>{body}</Text>
+      <View style={styles.menuCopy}>
+        <Text style={[styles.menuTitle, { color: theme.text }]}>{title}</Text>
+        {detail ? (
+          <Text
+            numberOfLines={1}
+            style={[styles.menuDetail, { color: theme.muted }]}
+          >
+            {detail}
+          </Text>
+        ) : null}
       </View>
-    </View>
+      {trailing ?? (
+        <MaterialSymbol
+          name="chevron.right"
+          color={theme.muted}
+          description={`${title}详情`}
+          decorative
+          size={18}
+        />
+      )}
+    </M3Pressable>
   );
 }
 
 function executionEnvironmentLabel(environment: string) {
-  if (environment.includes('storeClient')) {
-    return 'Expo Go 预览';
+  if (environment.includes("storeClient")) {
+    return "Expo Go 预览";
   }
-  if (environment.includes('standalone')) {
-    return '已安装应用';
+  if (environment.includes("standalone")) {
+    return "已安装应用";
   }
-  if (environment.includes('bare')) {
-    return '原生构建';
+  if (environment.includes("bare")) {
+    return "原生构建";
   }
-  return '开发预览';
+  return "开发预览";
 }
 
-function updateSectionKicker(phase: UpdatePhase) {
-  if (phase === 'available') {
-    return '可更新';
+function updateRowDetail(
+  phase: UpdatePhase,
+  message: string,
+  lastCheckedAt?: string,
+) {
+  if (phase === "idle") {
+    return message;
   }
-  if (phase === 'current') {
-    return '已最新';
+  if (phase === "checking") {
+    return "正在检查";
   }
-  if (phase === 'downloading' || phase === 'downloaded' || phase === 'installing') {
-    return '安装中';
+  if (phase === "available") {
+    return "发现新版本";
   }
-  if (phase === 'unavailable') {
-    return '稍后再试';
+  if (phase === "current") {
+    if (message === "暂无正式版本") {
+      return message;
+    }
+    return lastCheckedAt
+      ? `${formatCheckedAt(lastCheckedAt)} 已检查`
+      : "已是最新版本";
   }
-  if (phase === 'error' || phase === 'unsupported') {
-    return '需处理';
+  if (phase === "unavailable") {
+    return "稍后再试";
   }
-  return '手动检查';
-}
-
-function updatePhaseTitle(phase: UpdatePhase) {
-  switch (phase) {
-    case 'checking':
-      return '正在检查';
-    case 'current':
-      return '已是最新版本';
-    case 'available':
-      return '发现新内测';
-    case 'downloading':
-      return '正在下载';
-    case 'downloaded':
-      return '准备安装';
-    case 'installing':
-      return '等待系统确认';
-    case 'unavailable':
-      return '更新源暂不可用';
-    case 'unsupported':
-      return '当前平台不支持';
-    case 'error':
-      return '更新检查失败';
-    default:
-      return '版本更新';
-  }
+  return message || "检查失败";
 }
 
 function updatePhaseIcon(phase: UpdatePhase): MaterialSymbolName {
   switch (phase) {
-    case 'checking':
-      return 'refresh';
-    case 'current':
-    case 'downloaded':
-      return 'check.circle';
-    case 'error':
-    case 'unsupported':
-      return 'error';
-    case 'unavailable':
-      return 'info';
-    case 'available':
-    case 'downloading':
-      return 'download';
+    case "checking":
+      return "refresh";
+    case "current":
+      return "check.circle";
+    case "error":
+      return "error";
+    case "unavailable":
+      return "info";
+    case "available":
+      return "download";
     default:
-      return 'download';
+      return "download";
   }
-}
-
-function updateIconBackground(theme: AboutTheme, phase: UpdatePhase) {
-  if (phase === 'idle' || phase === 'checking') {
-    return theme.surfaceSolid;
-  }
-  if (phase === 'unavailable') {
-    return theme.surfaceSolid;
-  }
-  if (phase === 'error' || phase === 'unsupported') {
-    return '#F7DAD6';
-  }
-  return theme.accent;
-}
-
-function updateIconColor(theme: AboutTheme, phase: UpdatePhase) {
-  if (phase === 'idle' || phase === 'checking' || phase === 'unavailable') {
-    return theme.accent;
-  }
-  if (phase === 'error' || phase === 'unsupported') {
-    return '#8F1D12';
-  }
-  return theme.accentText;
 }
 
 function isUpdateSourceUnavailable(message: string) {
-  return /HTTP\s+(403|429|500|502|503|504)/i.test(message) || message.includes('Network request failed');
-}
-
-function formatBytes(bytes?: number) {
-  if (!bytes || bytes <= 0) {
-    return '未知大小';
-  }
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  }
-  return `${Math.round(bytes / 1024)} KB`;
-}
-
-function formatDownloadProgress(bytes: { written: number; total: number }) {
-  if (bytes.total <= 0) {
-    return bytes.written > 0 ? `${formatBytes(bytes.written)} 已下载` : '等待服务器返回大小';
-  }
-  return `${formatBytes(bytes.written)} / ${formatBytes(bytes.total)}`;
+  return (
+    /HTTP\s+(403|429|500|502|503|504)/i.test(message) ||
+    message.includes("Network request failed")
+  );
 }
 
 function formatCheckedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return '刚刚';
+    return "刚刚";
   }
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 const styles = StyleSheet.create({
@@ -544,314 +433,150 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 44,
-    paddingBottom: 44,
-    gap: 18,
+    flexGrow: 1,
+    paddingHorizontal: 28,
+    paddingBottom: 96,
   },
   contentWide: {
-    width: '100%',
-    maxWidth: 760,
-    alignSelf: 'center',
+    width: "100%",
+    maxWidth: 560,
+    alignSelf: "center",
   },
-  versionPill: {
-    minHeight: 34,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    backgroundColor: brand.colors.primaryContainer,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
+  navBar: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    left: 0,
+    zIndex: 10,
+    justifyContent: "center",
   },
-  versionPillText: {
-    color: brand.colors.onPrimaryContainer,
-    fontSize: 12,
-    fontWeight: '900',
+  backButton: {
+    marginLeft: 4,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backButtonPressed: {
+    opacity: 0.68,
+  },
+  backButtonIcon: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backButtonGlyph: {
+    marginLeft: -2,
+    marginTop: -2,
+    fontSize: 38,
+    lineHeight: 38,
+    fontWeight: "500",
     letterSpacing: 0,
   },
-  hero: {
-    minHeight: 206,
-    borderRadius: brand.radius.extraLarge,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(18, 20, 15, 0.08)',
-    backgroundColor: brand.colors.paperElevated,
-    padding: 18,
-    gap: 16,
-    boxShadow: brand.shadow.card,
-    overflow: 'hidden',
-  },
-  heroBrandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  heroLogoSeal: {
-    width: 76,
-    height: 76,
-    borderRadius: brand.radius.large,
-    borderCurve: 'continuous',
-    backgroundColor: '#F3E9D2',
-    overflow: 'hidden',
-    boxShadow: '0 12px 24px rgba(18, 20, 15, 0.12)',
-  },
-  heroLogo: {
-    width: '100%',
-    height: '100%',
-  },
-  heroCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 4,
-  },
-  eyebrow: {
-    color: brand.colors.copper,
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  title: {
-    color: brand.colors.ink,
-    fontSize: 42,
-    lineHeight: 46,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  subtitle: {
-    color: brand.colors.muted,
-    fontSize: 15,
+  navTitle: {
+    position: "absolute",
+    left: 80,
+    right: 80,
+    bottom: 16,
+    textAlign: "center",
+    fontSize: 17,
     lineHeight: 23,
-    fontWeight: '700',
+    fontWeight: "800",
     letterSpacing: 0,
   },
-  heroDivider: {
-    height: 1,
-    backgroundColor: 'rgba(18, 20, 15, 0.08)',
+  identity: {
+    alignItems: "center",
+    paddingTop: 22,
+    paddingBottom: 66,
   },
-  heroPills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  aboutPill: {
-    minHeight: 36,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    backgroundColor: brand.colors.copperSoft,
+  logoPlate: {
+    width: 84,
+    height: 84,
+    borderRadius: 24,
+    borderCurve: "continuous",
     borderWidth: 1,
-    borderColor: 'rgba(47, 107, 79, 0.16)',
+    overflow: "hidden",
+    boxShadow: "0 12px 26px rgba(18, 20, 15, 0.10)",
   },
-  aboutPillText: {
-    color: brand.colors.onPrimaryContainer,
-    fontSize: 12,
-    fontWeight: '900',
+  logo: {
+    position: "absolute",
+    left: -77,
+    top: -76,
+    width: 238,
+    height: 238,
+  },
+  appName: {
+    marginTop: 30,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: "900",
     letterSpacing: 0,
   },
-  promiseGrid: {
-    gap: 8,
+  versionText: {
+    marginTop: 7,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "500",
+    letterSpacing: 0,
   },
-  principleCard: {
-    minHeight: 78,
-    borderRadius: brand.radius.large,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    boxShadow: '0 6px 16px rgba(18, 20, 15, 0.05)',
+  menuGroup: {
+    borderTopWidth: 1,
   },
-  principleIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: brand.radius.small,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
+  menuRow: {
+    minHeight: 82,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
   },
-  principleCopy: {
+  menuIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderCurve: "continuous",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuCopy: {
     flex: 1,
     minWidth: 0,
     gap: 3,
   },
-  principleTitle: {
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  principleBody: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
-  infoSectionSurface: {
-    padding: 10,
-    gap: 0,
-  },
-  updateSectionSurface: {
-    padding: 10,
-    gap: 12,
-  },
-  updatePanel: {
-    gap: 12,
-  },
-  updateStatusCard: {
-    minHeight: 96,
-    borderRadius: brand.radius.large,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 14,
-  },
-  updateIconWell: {
-    width: 52,
-    height: 52,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  updateStatusCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 4,
-  },
-  updateTitle: {
+  menuTitle: {
     fontSize: 18,
-    lineHeight: 23,
-    fontWeight: '900',
+    lineHeight: 24,
+    fontWeight: "800",
     letterSpacing: 0,
   },
-  updateCaption: {
+  menuDetail: {
     fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '700',
+    lineHeight: 17,
+    fontWeight: "600",
     letterSpacing: 0,
   },
-  versionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  disabledRow: {
+    opacity: 0.68,
+  },
+  footer: {
+    marginTop: "auto",
+    paddingTop: 92,
+    alignItems: "center",
     gap: 8,
   },
-  versionMetric: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    minHeight: 86,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    padding: 12,
-    gap: 4,
-  },
-  versionMetricTitle: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  versionMetricValue: {
-    fontSize: 18,
-    lineHeight: 23,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  versionMetricDetail: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
-  releaseNoteBox: {
-    borderRadius: brand.radius.large,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    padding: 14,
-    gap: 7,
-  },
-  releaseNoteHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  releaseNoteTitle: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 14,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  releaseNoteMeta: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  releaseNoteText: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
-  updateActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flexWrap: 'wrap',
-  },
-  updateButton: {
-    minHeight: 46,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
-  updateButtonText: {
-    fontSize: 14,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  secondaryButton: {
-    minHeight: 46,
-    borderRadius: brand.radius.round,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  secondaryButtonText: {
+  footerLink: {
     fontSize: 13,
-    fontWeight: '900',
+    lineHeight: 18,
+    fontWeight: "800",
     letterSpacing: 0,
+    textAlign: "center",
   },
-  updateFinePrint: {
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '700',
+  footerText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "600",
     letterSpacing: 0,
-  },
-  disabledButton: {
-    opacity: 0.62,
-  },
-  paragraph: {
-    color: brand.colors.muted,
-    fontSize: 14,
-    lineHeight: 22,
-    fontWeight: '700',
+    textAlign: "center",
   },
 });

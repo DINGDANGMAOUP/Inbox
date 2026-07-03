@@ -57,7 +57,7 @@
       "reactCompiler": true
     },
     "extra": {
-      "appStage": "internal",
+      "appStage": "release",
       "githubUpdates": {
         "owner": "DINGDANGMAOUP",
         "repo": "Inbox"

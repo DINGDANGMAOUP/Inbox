@@ -11,6 +11,7 @@ import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol } from '@/components/reader/material-symbol';
 import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
 import { brand } from '@/constants/brand';
+import { motion } from '@/constants/motion';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
 import { authorLabel, bookTitleLabel, progressLabel } from '@/lib/library-book-labels';
@@ -41,7 +42,6 @@ export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const theme = brand.appThemes[resolvedAppTheme];
-  const isDeepTheme = resolvedAppTheme === 'deep';
 
   const closeSearch = useCallback(() => {
     inputRef.current?.blur();
@@ -76,19 +76,20 @@ export default function SearchScreen() {
   }, [db]);
 
   useEffect(() => {
-    const timer = setTimeout(() => inputRef.current?.focus(), 260);
+    const timer = setTimeout(() => inputRef.current?.focus(), motion.duration.medium + 120);
     return () => clearTimeout(timer);
   }, []);
 
   const trimmedQuery = query.trim().toLowerCase();
+  const hasQuery = trimmedQuery.length > 0;
   const results = useMemo(() => {
-    if (!trimmedQuery) {
-      return books.slice(0, 8);
+    if (!hasQuery) {
+      return [];
     }
     return books.filter((book) => normalizedSearchText(book).includes(trimmedQuery));
-  }, [books, trimmedQuery]);
+  }, [books, hasQuery, trimmedQuery]);
 
-  const resultLabel = trimmedQuery ? `${results.length} 个结果` : books.length ? '全部书籍' : '等待导入';
+  const resultLabel = hasQuery ? `${results.length} 个结果` : '输入关键词搜索';
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
@@ -96,7 +97,7 @@ export default function SearchScreen() {
         key={`search-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
-        overlayColor={isDeepTheme ? 'rgba(8, 9, 6, 0.36)' : 'rgba(247, 243, 234, 0.78)'}>
+        overlayColor={theme.background}>
         <ScrollView
           keyboardShouldPersistTaps="always"
           contentInsetAdjustmentBehavior="automatic"
@@ -141,13 +142,13 @@ export default function SearchScreen() {
 
           {loading ? (
             <M3StatePanel theme={theme} title="正在读取书架" artwork={<ActivityIndicator color={theme.accent} />} />
-          ) : results.length ? (
+          ) : hasQuery && results.length ? (
             <View style={styles.resultList}>
               {results.map((book, index) => (
                 <LibraryBookRow key={book.id} book={book} index={index} theme={resolvedAppTheme} />
               ))}
             </View>
-          ) : (
+          ) : hasQuery ? (
             <Animated.View entering={m3Motion.fadeDown()} style={[styles.noResultPanel, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
               <View style={[styles.noResultIcon, { backgroundColor: theme.primaryContainer }]}>
                 <MaterialSymbol name="magnifyingglass" color={theme.onPrimaryContainer} description="没有结果" decorative size={24} />
@@ -158,7 +159,7 @@ export default function SearchScreen() {
                 <Text style={[styles.resetButtonText, { color: theme.onPrimaryContainer }]}>清除搜索</Text>
               </M3Pressable>
             </Animated.View>
-          )}
+          ) : null}
         </ScrollView>
       </M3Screen>
     </Animated.View>

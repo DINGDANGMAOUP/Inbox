@@ -1,4 +1,5 @@
 import { Link, router, useLocalSearchParams } from 'expo-router';
+import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,6 +46,19 @@ type Panel = 'toc' | 'search' | 'notes' | 'settings' | null;
 type ReaderPanel = Exclude<Panel, null>;
 type AnnotationFilter = 'all' | Annotation['type'];
 type ReaderInsets = { top: number; bottom: number };
+type TextSelection = {
+  selectedText: string;
+  offset: number;
+  x: number;
+  y: number;
+};
+type ReaderAnnotationMark = {
+  id: string;
+  type: 'highlight' | 'note';
+  selectedText: string;
+  quote?: string;
+  offset?: number;
+};
 
 const annotationLabels: Record<Annotation['type'], string> = {
   bookmark: '书签',
@@ -152,8 +166,30 @@ function renderTextBlock(block: string) {
   return `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`;
 }
 
-function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
+function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, readerInsets: ReaderInsets, restoreRatio: number) {
   const theme = brand.readerThemes[preferences.readerTheme];
+  const initialInsets = {
+    top: Math.max(32, Math.round(readerInsets.top)),
+    bottom: Math.max(48, Math.round(readerInsets.bottom)),
+  };
+  const pageModeCss =
+    preferences.readingMode === 'page'
+      ? `
+    html {
+      height: 100%;
+      overflow-x: hidden;
+      overflow-y: hidden;
+    }
+    body {
+      min-height: 100vh;
+      height: 100vh;
+      overflow: visible;
+      column-width: max(220px, calc(100vw - ${preferences.margin * 2}px));
+      column-gap: ${preferences.margin * 2}px;
+      -webkit-column-width: max(220px, calc(100vw - ${preferences.margin * 2}px));
+      -webkit-column-gap: ${preferences.margin * 2}px;
+    }`
+      : '';
   const paragraphs = chapter.textContent
     .replace(/\\r/g, '\n')
     .replace(/\r/g, '\n')
@@ -167,9 +203,12 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <style>
+    html {
+      background: ${theme.background};
+    }
     body {
       margin: 0;
-      padding: 112px ${preferences.margin}px 280px;
+      padding: ${initialInsets.top}px ${preferences.margin}px ${initialInsets.bottom}px;
       background: var(--reader-bg, ${theme.background});
       color: var(--reader-text, ${theme.text});
       font-family: "Songti SC", "Noto Serif CJK SC", "Noto Serif", Georgia, serif;
@@ -181,7 +220,11 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
       max-width: 720px;
       margin-left: auto;
       margin-right: auto;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
+    ${pageModeCss}
     p { margin: 0 0 1.12em; }
     h2 {
       margin: 1.25em 0 0.75em;
@@ -195,14 +238,59 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences) {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-weight: 700;
     }
-    ::selection { background: rgba(167, 121, 78, 0.28); }
+    .inbox-custom-selection {
+      background: rgba(167, 121, 78, 0.28);
+      border-radius: 0.16em;
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
+    }
+    .inbox-saved-annotation {
+      border-radius: 0.12em;
+      cursor: pointer;
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
+    }
+    .inbox-saved-highlight {
+      background: rgba(216, 235, 213, 0.36);
+      text-decoration: underline;
+      text-decoration-color: rgba(47, 107, 79, 0.72);
+      text-decoration-thickness: 2px;
+      text-underline-offset: 0.18em;
+    }
+    .inbox-saved-note {
+      background: rgba(226, 230, 189, 0.28);
+      text-decoration: underline dotted;
+      text-decoration-color: rgba(94, 96, 67, 0.82);
+      text-decoration-thickness: 2px;
+      text-underline-offset: 0.2em;
+    }
   </style>
 </head>
 <body>
   ${paragraphs}
+  ${initialReaderPositionScript(preferences, restoreRatio)}
   ${readerScript()}
 </body>
 </html>`;
+}
+
+function initialReaderPositionScript(preferences: ReaderPreferences, restoreRatio: number) {
+  return `<script>
+    (function() {
+      var mode = "${preferences.readingMode}";
+      var restoreRatio = ${restoreRatio};
+      function pageStep() {
+        return Math.max(1, window.innerWidth);
+      }
+      function pageCount() {
+        return Math.max(1, Math.round(Math.max(0, document.documentElement.scrollWidth - window.innerWidth) / pageStep()) + 1);
+      }
+      if (mode === "page") {
+        var targetPage = Math.round(restoreRatio * Math.max(1, pageCount() - 1));
+        window.scrollTo(targetPage * pageStep(), 0);
+      }
+    })();
+  </script>`;
 }
 
 function escapeHtml(input: string) {
@@ -219,12 +307,19 @@ function readerScript() {
     window.__INBOX_CAPTURE_SELECTION = function() {
       var selection = window.getSelection();
       var selectedText = selection ? selection.toString().trim() : "";
+      var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
+      var rect = range && range.getBoundingClientRect ? range.getBoundingClientRect() : null;
       window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: selectedText ? "selection" : "selection-empty",
+        type: selectedText ? "selection-menu" : "selection-empty",
         selectedText: selectedText,
-        offset: selectedText ? document.body.innerText.indexOf(selectedText) : -1
+        offset: selectedText ? document.body.innerText.indexOf(selectedText) : -1,
+        x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+        y: rect ? rect.bottom : 96
       }));
     };
+    document.addEventListener("contextmenu", function(event) {
+      event.preventDefault();
+    });
     window.addEventListener("scroll", function() {
       var max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
       window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -326,6 +421,7 @@ function preferenceScript(
         document.body.style.paddingRight = margin + "px";
         document.body.style.paddingTop = safeInsets.top + "px";
         document.body.style.paddingBottom = safeInsets.bottom + "px";
+        disableNativeSelection();
 
         if (mode === "page") {
           document.documentElement.style.height = "100%";
@@ -395,10 +491,310 @@ function preferenceScript(
       };
 
       window.__INBOX_REPORT_PROGRESS = reportProgress;
+      if (typeof window.__INBOX_SELECTION_ACTIVE__ === "undefined") {
+        window.__INBOX_SELECTION_ACTIVE__ = false;
+      }
+      var customSelectionMark = null;
+
+      function disableNativeSelection() {
+        document.documentElement.style.webkitUserSelect = "none";
+        document.documentElement.style.userSelect = "none";
+        document.documentElement.style.webkitTouchCallout = "none";
+        document.body.style.webkitUserSelect = "none";
+        document.body.style.userSelect = "none";
+        document.body.style.webkitTouchCallout = "none";
+      }
+
+      function clearNativeSelection() {
+        var selection = window.getSelection ? window.getSelection() : null;
+        if (selection && selection.removeAllRanges) {
+          selection.removeAllRanges();
+        }
+      }
+
+      function clearCustomSelection(silent) {
+        var marks = document.querySelectorAll(".inbox-custom-selection");
+        marks.forEach(function(mark) {
+          var parent = mark.parentNode;
+          if (!parent) {
+            return;
+          }
+          while (mark.firstChild) {
+            parent.insertBefore(mark.firstChild, mark);
+          }
+          parent.removeChild(mark);
+          parent.normalize();
+        });
+        customSelectionMark = null;
+        clearNativeSelection();
+        if (window.__INBOX_SELECTION_ACTIVE__) {
+          window.__INBOX_SELECTION_ACTIVE__ = false;
+          if (!silent) {
+            postMessage({ type: "selection-clear" });
+          }
+        }
+      }
+
+      function unwrapSavedAnnotations() {
+        var marks = document.querySelectorAll(".inbox-saved-annotation");
+        marks.forEach(function(mark) {
+          var parent = mark.parentNode;
+          if (!parent) {
+            return;
+          }
+          while (mark.firstChild) {
+            parent.insertBefore(mark.firstChild, mark);
+          }
+          parent.removeChild(mark);
+          parent.normalize();
+        });
+      }
+
+      function textRangeForOffset(start, end) {
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        var total = 0;
+        var range = document.createRange();
+        var current = walker.nextNode();
+        var foundStart = false;
+
+        while (current) {
+          var nextTotal = total + current.nodeValue.length;
+          if (!foundStart && start >= total && start <= nextTotal) {
+            range.setStart(current, Math.max(0, start - total));
+            foundStart = true;
+          }
+          if (foundStart && end >= total && end <= nextTotal) {
+            range.setEnd(current, Math.max(0, end - total));
+            return range;
+          }
+          total = nextTotal;
+          current = walker.nextNode();
+        }
+
+        return null;
+      }
+
+      function markSavedAnnotation(annotation) {
+        var text = String(annotation.quote || annotation.selectedText || "").trim();
+        if (!text) {
+          return;
+        }
+
+        var fullText = document.body.textContent || "";
+        var start = Number.isFinite(annotation.offset) ? annotation.offset : -1;
+        if (start < 0 || fullText.slice(start, start + text.length) !== text) {
+          start = fullText.indexOf(text);
+        }
+        if (start < 0) {
+          return;
+        }
+
+        var range = textRangeForOffset(start, start + text.length);
+        if (!range) {
+          return;
+        }
+
+        var mark = document.createElement("span");
+        mark.className = "inbox-saved-annotation inbox-saved-" + annotation.type;
+        mark.setAttribute("data-annotation-id", annotation.id);
+        mark.setAttribute("data-annotation-type", annotation.type);
+        try {
+          range.surroundContents(mark);
+        } catch (error) {
+          var fragment = range.extractContents();
+          mark.appendChild(fragment);
+          range.insertNode(mark);
+        }
+      }
+
+      window.__INBOX_APPLY_ANNOTATIONS__ = function(annotations) {
+        unwrapSavedAnnotations();
+        (annotations || []).forEach(markSavedAnnotation);
+      };
+
+      function rangeFromPoint(x, y) {
+        if (document.caretRangeFromPoint) {
+          return document.caretRangeFromPoint(x, y);
+        }
+        if (document.caretPositionFromPoint) {
+          var position = document.caretPositionFromPoint(x, y);
+          if (!position) {
+            return null;
+          }
+          var range = document.createRange();
+          range.setStart(position.offsetNode, position.offset);
+          range.collapse(true);
+          return range;
+        }
+        return null;
+      }
+
+      function firstTextNode(node) {
+        if (!node) {
+          return null;
+        }
+        if (node.nodeType === Node.TEXT_NODE && node.nodeValue && node.nodeValue.trim()) {
+          return node;
+        }
+        var walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null);
+        var textNode = walker.nextNode();
+        while (textNode && !textNode.nodeValue.trim()) {
+          textNode = walker.nextNode();
+        }
+        return textNode;
+      }
+
+      function documentTextOffset(node, offset) {
+        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+        var total = 0;
+        var current = walker.nextNode();
+        while (current) {
+          if (current === node) {
+            return total + offset;
+          }
+          total += current.nodeValue.length;
+          current = walker.nextNode();
+        }
+        return Math.max(0, document.body.innerText.indexOf(node.nodeValue.slice(offset, offset + 12)));
+      }
+
+      function isCjk(char) {
+        return /[\\u3400-\\u9fff]/.test(char);
+      }
+
+      function isSentenceBoundary(char) {
+        return /[。！？!?；;\\n\\r]/.test(char);
+      }
+
+      function isWordBoundary(char) {
+        return /[\\s\\n\\r\\t,.;:!?，。！？；：、()\\[\\]{}"'“”‘’]/.test(char);
+      }
+
+      function selectionSlice(text, offset) {
+        if (!text || !text.trim()) {
+          return null;
+        }
+        var pivot = Math.max(0, Math.min(text.length - 1, offset));
+        if (/\\s/.test(text.charAt(pivot))) {
+          var nearby = pivot;
+          while (nearby < text.length && nearby - pivot < 8 && /\\s/.test(text.charAt(nearby))) {
+            nearby += 1;
+          }
+          if (nearby < text.length && !/\\s/.test(text.charAt(nearby))) {
+            pivot = nearby;
+          }
+        }
+
+        var start = pivot;
+        var end = pivot + 1;
+        if (isCjk(text.charAt(pivot))) {
+          while (start > 0 && !isSentenceBoundary(text.charAt(start - 1)) && pivot - start < 18) {
+            start -= 1;
+          }
+          while (end < text.length && !isSentenceBoundary(text.charAt(end)) && end - pivot < 24) {
+            end += 1;
+          }
+          if (end < text.length && isSentenceBoundary(text.charAt(end))) {
+            end += 1;
+          }
+        } else {
+          while (start > 0 && !isWordBoundary(text.charAt(start - 1))) {
+            start -= 1;
+          }
+          while (end < text.length && !isWordBoundary(text.charAt(end))) {
+            end += 1;
+          }
+        }
+
+        while (start < end && /\\s/.test(text.charAt(start))) {
+          start += 1;
+        }
+        while (end > start && /\\s/.test(text.charAt(end - 1))) {
+          end -= 1;
+        }
+
+        if (end <= start) {
+          return null;
+        }
+        return { start: start, end: end, text: text.slice(start, end) };
+      }
+
+      function createCustomSelection(point) {
+        clearCustomSelection(true);
+        var range = rangeFromPoint(point.clientX, point.clientY);
+        if (!range) {
+          postMessage({ type: "selection-empty" });
+          return false;
+        }
+
+        var textNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer : firstTextNode(range.startContainer);
+        if (!textNode || !textNode.nodeValue) {
+          postMessage({ type: "selection-empty" });
+          return false;
+        }
+
+        var slice = selectionSlice(textNode.nodeValue, range.startOffset);
+        if (!slice || !slice.text.trim()) {
+          postMessage({ type: "selection-empty" });
+          return false;
+        }
+
+        var markRange = document.createRange();
+        markRange.setStart(textNode, slice.start);
+        markRange.setEnd(textNode, slice.end);
+        var offset = documentTextOffset(textNode, slice.start);
+        var mark = document.createElement("span");
+        mark.className = "inbox-custom-selection";
+        mark.setAttribute("data-inbox-selection", "true");
+        try {
+          markRange.surroundContents(mark);
+        } catch (error) {
+          postMessage({ type: "selection-empty" });
+          return false;
+        }
+
+        customSelectionMark = mark;
+        window.__INBOX_SELECTION_ACTIVE__ = true;
+        var rect = mark.getBoundingClientRect();
+        postMessage({
+          type: "selection-menu",
+          selectedText: slice.text.trim(),
+          offset: offset,
+          x: rect ? rect.left + rect.width / 2 : point.clientX,
+          y: rect ? rect.bottom : point.clientY
+        });
+        return true;
+      }
+
+      function reportSelectionMenu() {
+        if (!customSelectionMark) {
+          postMessage({ type: "selection-empty" });
+          return;
+        }
+        var rect = customSelectionMark.getBoundingClientRect();
+        postMessage({
+          type: "selection-menu",
+          selectedText: customSelectionMark.innerText.trim(),
+          offset: document.body.innerText.indexOf(customSelectionMark.innerText.trim()),
+          x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+          y: rect ? rect.bottom : 96
+        });
+      }
+
+      window.__INBOX_CLEAR_SELECTION = function() {
+        clearCustomSelection(true);
+      };
+
+      window.__INBOX_CAPTURE_SELECTION = function() {
+        reportSelectionMenu();
+      };
 
       if (!window.__INBOX_SCRIPT_READY__) {
         window.__INBOX_SCRIPT_READY__ = true;
         var progressTimer = null;
+        var longPressTimer = null;
+        var longPressPoint = null;
+        var longPressActivated = false;
         var lastTouchAt = 0;
 
         function tapRatio(point) {
@@ -415,10 +811,19 @@ function preferenceScript(
           if (target && target.closest && target.closest("a")) {
             return;
           }
-          var selection = window.getSelection ? window.getSelection().toString().trim() : "";
-          if (selection) {
+          var annotationMark = target && target.closest && target.closest(".inbox-saved-annotation");
+          if (annotationMark) {
+            postMessage({
+              type: "annotation-open",
+              annotationId: annotationMark.getAttribute("data-annotation-id")
+            });
             return;
           }
+          if (window.__INBOX_SELECTION_ACTIVE__) {
+            clearCustomSelection(false);
+            return;
+          }
+          postMessage({ type: "selection-clear" });
           if (window.__INBOX_PANEL_ACTIVE__) {
             postMessage({ type: "dismissPanel" });
             return;
@@ -441,14 +846,62 @@ function preferenceScript(
           postMessage({ type: "toggleChrome" });
         }
 
+        function cancelLongPress() {
+          if (longPressTimer) {
+            clearTimeout(longPressTimer);
+          }
+          longPressTimer = null;
+          longPressPoint = null;
+        }
+
+        document.addEventListener("touchstart", function(event) {
+          var touch = event.touches && event.touches[0];
+          if (!touch || (event.target && event.target.closest && event.target.closest("a"))) {
+            return;
+          }
+          cancelLongPress();
+          longPressActivated = false;
+          longPressPoint = {
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+            screenX: touch.screenX
+          };
+          longPressTimer = setTimeout(function() {
+            if (!longPressPoint) {
+              return;
+            }
+            longPressActivated = createCustomSelection(longPressPoint);
+            if (longPressActivated) {
+              lastTouchAt = Date.now();
+            }
+          }, 420);
+        }, { passive: true, capture: true });
+
+        document.addEventListener("touchmove", function(event) {
+          var touch = event.touches && event.touches[0];
+          if (!touch || !longPressPoint) {
+            return;
+          }
+          if (Math.abs(touch.clientX - longPressPoint.clientX) > 16 || Math.abs(touch.clientY - longPressPoint.clientY) > 16) {
+            cancelLongPress();
+          }
+        }, { passive: true, capture: true });
+
         document.addEventListener("touchend", function(event) {
           var touch = event.changedTouches && event.changedTouches[0];
           if (!touch) {
             return;
           }
+          cancelLongPress();
+          if (longPressActivated) {
+            event.preventDefault();
+            event.stopPropagation();
+            longPressActivated = false;
+            return;
+          }
           lastTouchAt = Date.now();
           handleReaderTap(event, touch);
-        }, { passive: true, capture: true });
+        }, { passive: false, capture: true });
 
         document.addEventListener("click", function(event) {
           if (Date.now() - lastTouchAt < 450) {
@@ -456,7 +909,15 @@ function preferenceScript(
           }
           handleReaderTap(event, event);
         });
+        document.addEventListener("contextmenu", function(event) {
+          event.preventDefault();
+          clearNativeSelection();
+          createCustomSelection(event);
+        });
         window.addEventListener("scroll", function() {
+          if (window.__INBOX_SELECTION_ACTIVE__) {
+            clearCustomSelection(false);
+          }
           if (progressTimer) {
             clearTimeout(progressTimer);
           }
@@ -476,16 +937,83 @@ function preferenceScript(
         });
       }
 
-      applyMode();
-      setTimeout(function() {
+      function restorePosition() {
         if (mode === "page") {
           var targetPage = Math.round(restoreRatio * Math.max(1, pageCount() - 1));
           window.scrollTo({ left: targetPage * pageStep(), top: 0, behavior: "auto" });
         } else {
           window.scrollTo({ left: 0, top: restoreRatio * maxVerticalScroll(), behavior: "auto" });
         }
+      }
+
+      applyMode();
+      restorePosition();
+      setTimeout(function() {
+        restorePosition();
         reportProgress();
-      }, 180);
+      }, 80);
+    })();
+    true;
+  `;
+}
+
+function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio: number, readerInsets: ReaderInsets) {
+  const theme = brand.readerThemes[preferences.readerTheme];
+  const initialInsets = {
+    top: Math.max(32, Math.round(readerInsets.top)),
+    bottom: Math.max(48, Math.round(readerInsets.bottom)),
+  };
+  return `
+    (function() {
+      var mode = "${preferences.readingMode}";
+      var margin = ${preferences.margin};
+      var restoreRatio = ${restoreRatio};
+      var initialInsets = ${JSON.stringify(initialInsets)};
+      function pageStep() {
+        return Math.max(1, window.innerWidth);
+      }
+      function pageCount() {
+        return Math.max(1, Math.round(Math.max(0, document.documentElement.scrollWidth - window.innerWidth) / pageStep()) + 1);
+      }
+      function applyInitialLayout() {
+        document.documentElement.style.background = "${theme.background}";
+        document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
+        document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
+        document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
+        document.documentElement.style.setProperty("--reader-text", "${theme.text}");
+        if (!document.body) {
+          return;
+        }
+        document.body.style.background = "${theme.background}";
+        document.body.style.color = "${theme.text}";
+        document.body.style.fontSize = "${preferences.fontSize}px";
+        document.body.style.lineHeight = "${preferences.lineHeight}";
+        document.body.style.boxSizing = "border-box";
+        document.body.style.paddingLeft = margin + "px";
+        document.body.style.paddingRight = margin + "px";
+        document.body.style.paddingTop = initialInsets.top + "px";
+        document.body.style.paddingBottom = initialInsets.bottom + "px";
+        if (mode === "page") {
+          document.documentElement.style.height = "100%";
+          document.documentElement.style.overflowX = "hidden";
+          document.documentElement.style.overflowY = "hidden";
+          document.body.style.minHeight = "100vh";
+          document.body.style.height = "100vh";
+          document.body.style.overflow = "visible";
+          document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+          document.body.style.columnGap = margin * 2 + "px";
+          document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+          document.body.style.webkitColumnGap = margin * 2 + "px";
+          window.scrollTo(Math.round(restoreRatio * Math.max(1, pageCount() - 1)) * pageStep(), 0);
+          return;
+        }
+        window.scrollTo(0, restoreRatio * Math.max(1, document.documentElement.scrollHeight - window.innerHeight));
+      }
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", applyInitialLayout, { once: true });
+      } else {
+        applyInitialLayout();
+      }
     })();
     true;
   `;
@@ -562,7 +1090,7 @@ export default function ReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
   const lastProgressSave = useRef(0);
   const [book, setBook] = useState<Book | null>(null);
@@ -580,10 +1108,12 @@ export default function ReaderScreen() {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [panel, setPanel] = useState<Panel>(null);
   const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>('all');
-  const [chromeVisible, setChromeVisible] = useState(true);
+  const [chromeVisible, setChromeVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [noteDraft, setNoteDraft] = useState('');
+  const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
+  const [noteSelection, setNoteSelection] = useState<TextSelection | null>(null);
   const [loading, setLoading] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -638,6 +1168,27 @@ export default function ReaderScreen() {
 
     return annotations.filter((annotation) => annotation.type === annotationFilter);
   }, [annotationFilter, annotations]);
+  const readerAnnotationMarks = useMemo<ReaderAnnotationMark[]>(() => {
+    if (!currentChapter) {
+      return [];
+    }
+
+    return annotations.flatMap((annotation) => {
+      if (annotation.chapterId !== currentChapter.id || !annotation.selectedText || (annotation.type !== 'highlight' && annotation.type !== 'note')) {
+        return [];
+      }
+      const position = parseAnnotationPosition(annotation.position);
+      return [
+        {
+          id: annotation.id,
+          type: annotation.type,
+          selectedText: annotation.selectedText,
+          quote: position.quote ?? annotation.selectedText,
+          offset: typeof position.offset === 'number' ? position.offset : undefined,
+        },
+      ];
+    });
+  }, [annotations, currentChapter]);
   const annotationCounts = useMemo(() => {
     return annotations.reduce(
       (counts, annotation) => {
@@ -653,14 +1204,26 @@ export default function ReaderScreen() {
   const bottomDockVisible = chromeVisible && panel === null;
   const readerInsets = useMemo(
     () => ({
-      top: chromeVisible ? Math.ceil(chromeTopOffset + (topChromeHeight || 64) + 20) : 42,
-      bottom: bottomDockVisible ? Math.ceil(chromeBottomOffset + (bottomChromeHeight || 118) + 26) : 68,
+      top: Math.max(42, Math.ceil(insets.top + 12)),
+      bottom: Math.max(56, Math.ceil(insets.bottom + 28)),
     }),
-    [bottomChromeHeight, bottomDockVisible, chromeTopOffset, chromeVisible, chromeBottomOffset, topChromeHeight]
+    [insets.bottom, insets.top]
   );
   const panelHeight = panel
     ? Math.min(windowHeight * (panel === 'search' ? 0.62 : 0.74), windowHeight - chromeTopOffset - 32)
     : undefined;
+  const selectionMenuStyle = useMemo(() => {
+    if (!textSelection) {
+      return null;
+    }
+
+    const menuWidth = 248;
+    return {
+      left: Math.min(windowWidth - menuWidth - 12, Math.max(12, textSelection.x - menuWidth / 2)),
+      top: Math.min(windowHeight - chromeBottomOffset - 72, Math.max(insets.top + 88, textSelection.y + 20)),
+      width: menuWidth,
+    };
+  }, [chromeBottomOffset, insets.top, textSelection, windowHeight, windowWidth]);
 
   const handleTopChromeLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
@@ -675,6 +1238,8 @@ export default function ReaderScreen() {
   const closePanel = useCallback(() => {
     Keyboard.dismiss();
     setPanel(null);
+    setTextSelection(null);
+    setNoteSelection(null);
   }, []);
 
   const showNotice = useCallback((message: string) => {
@@ -779,6 +1344,8 @@ export default function ReaderScreen() {
       setRestoreRatio(ratio);
       setPageStatus({ pageIndex: 1, pageCount: 1 });
       setPanel(null);
+      setTextSelection(null);
+      setNoteSelection(null);
       saveProgress(db, book.id, chapters[index].id, ratio);
     },
     [book, chapters, db]
@@ -813,9 +1380,72 @@ export default function ReaderScreen() {
     [chapters, goToChapter, showNotice]
   );
 
+  const clearWebSelection = useCallback(() => {
+    webViewRef.current?.injectJavaScript(`
+      window.__INBOX_CLEAR_SELECTION && window.__INBOX_CLEAR_SELECTION();
+      window.getSelection && window.getSelection().removeAllRanges();
+      true;
+    `);
+  }, []);
+
+  const copySelectedText = useCallback(async () => {
+    if (!textSelection) {
+      return;
+    }
+
+    const copied = await Clipboard.setStringAsync(textSelection.selectedText);
+    setTextSelection(null);
+    clearWebSelection();
+    showNotice(copied ? '已复制' : '复制失败，请重试');
+  }, [clearWebSelection, showNotice, textSelection]);
+
+  const saveSelectedHighlight = useCallback(async () => {
+    if (!book || !currentChapter || !textSelection) {
+      return;
+    }
+
+    const selection = textSelection;
+    setTextSelection(null);
+    clearWebSelection();
+    await createAnnotation(db, {
+      bookId: book.id,
+      chapterId: currentChapter.id,
+      type: 'highlight',
+      selectedText: selection.selectedText,
+      color: '#f6d46a',
+      position: JSON.stringify({ offset: selection.offset, quote: selection.selectedText.slice(0, 140) }),
+    });
+    setAnnotations(await listAnnotations(db, book.id));
+    showNotice('已保存划线');
+  }, [book, clearWebSelection, currentChapter, db, showNotice, textSelection]);
+
+  const startSelectionNote = useCallback(() => {
+    if (!textSelection) {
+      return;
+    }
+
+    setNoteSelection(textSelection);
+    setNoteDraft('');
+    setTextSelection(null);
+    clearWebSelection();
+    setPanel('notes');
+    setChromeVisible(true);
+  }, [clearWebSelection, textSelection]);
+
   const handleWebMessage = useCallback(
     async (event: WebViewMessageEvent) => {
-      let payload: { type?: string; ratio?: number; selectedText?: string; offset?: number; pageIndex?: number; pageCount?: number; direction?: 'prev' | 'next' };
+      let payload: {
+        type?: string;
+        annotationId?: string;
+        ratio?: number;
+        selectedText?: string;
+        offset?: number;
+        x?: number;
+        y?: number;
+        pageIndex?: number;
+        pageCount?: number;
+        direction?: 'prev' | 'next';
+      };
       try {
         payload = JSON.parse(event.nativeEvent.data);
       } catch {
@@ -829,12 +1459,16 @@ export default function ReaderScreen() {
       if (payload.type === 'dismissChrome') {
         Keyboard.dismiss();
         setPanel(null);
+        setTextSelection(null);
+        setNoteSelection(null);
         setChromeVisible(false);
       }
 
       if (payload.type === 'dismissPanel') {
         Keyboard.dismiss();
         setPanel(null);
+        setTextSelection(null);
+        setNoteSelection(null);
         setChromeVisible(true);
       }
 
@@ -852,33 +1486,59 @@ export default function ReaderScreen() {
       }
 
       if (payload.type === 'pageBoundary' && payload.direction === 'prev') {
-        showNotice(currentIndex > 0 ? '已经是本章第一页，点上一章切换章节' : '已经是第一章');
+        if (currentIndex > 0) {
+          goToChapter(currentIndex - 1, 1);
+          return;
+        }
+        showNotice('已经是第一章');
       }
 
       if (payload.type === 'pageBoundary' && payload.direction === 'next') {
-        showNotice(currentIndex < chapters.length - 1 ? '本章已结束，点下一章继续' : '已经读到最后一章');
+        if (currentIndex < chapters.length - 1) {
+          goToChapter(currentIndex + 1, 0);
+          return;
+        }
+        showNotice('已经读到最后一章');
       }
 
       if (payload.type === 'selection-empty') {
         showNotice('先选择正文中的文字，再点划线');
       }
 
-      if (payload.type === 'selection' && book && currentChapter && payload.selectedText) {
-        await createAnnotation(db, {
-          bookId: book.id,
-          chapterId: currentChapter.id,
-          type: 'highlight',
-          selectedText: payload.selectedText,
-          color: '#f6d46a',
-          position: JSON.stringify({ offset: payload.offset ?? -1, quote: payload.selectedText.slice(0, 140) }),
-        });
-        setAnnotations(await listAnnotations(db, book.id));
-        showNotice('已保存划线');
+      if (payload.type === 'selection-clear') {
+        setTextSelection(null);
+      }
+
+      if (payload.type === 'annotation-open' && payload.annotationId) {
+        const annotation = annotations.find((item) => item.id === payload.annotationId);
+        setTextSelection(null);
+        setNoteSelection(null);
+        setAnnotationFilter(annotation?.type === 'note' ? 'note' : annotation?.type === 'highlight' ? 'highlight' : 'all');
         setPanel('notes');
+        setChromeVisible(true);
+      }
+
+      if ((payload.type === 'selection-menu' || payload.type === 'selection') && payload.selectedText) {
+        Keyboard.dismiss();
+        setPanel(null);
+        setChromeVisible(false);
+        setTextSelection({
+          selectedText: payload.selectedText,
+          offset: payload.offset ?? -1,
+          x: payload.x ?? windowWidth / 2,
+          y: payload.y ?? 96,
+        });
       }
     },
-    [book, chapters.length, commitProgress, currentChapter, currentIndex, db, preferences.readingMode, showNotice]
+    [annotations, chapters.length, commitProgress, currentIndex, goToChapter, preferences.readingMode, showNotice, windowWidth]
   );
+
+  const applyReaderAnnotations = useCallback(() => {
+    webViewRef.current?.injectJavaScript(`
+      window.__INBOX_APPLY_ANNOTATIONS__ && window.__INBOX_APPLY_ANNOTATIONS__(${JSON.stringify(readerAnnotationMarks)});
+      true;
+    `);
+  }, [readerAnnotationMarks]);
 
   const readerUiActive = chromeVisible || panel !== null;
   const readerPanelActive = panel !== null;
@@ -886,6 +1546,19 @@ export default function ReaderScreen() {
     () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive, readerPanelActive, readerInsets),
     [preferences, readerInsets, readerPanelActive, readerUiActive, reduceMotion, restoreRatio]
   );
+  const injectedJavaScriptBeforeContentLoaded = useMemo(
+    () => initialReaderLayoutScript(preferences, restoreRatio, readerInsets),
+    [preferences, readerInsets, restoreRatio]
+  );
+  const readerSource = useMemo(() => {
+    if (!book || !currentChapter) {
+      return undefined;
+    }
+
+    return currentChapter.htmlPath && book.format === 'epub'
+      ? { uri: currentChapter.htmlPath }
+      : { html: readerHtmlForText(currentChapter, preferences, readerInsets, restoreRatio) };
+  }, [book, currentChapter, preferences, readerInsets, restoreRatio]);
 
   useEffect(() => {
     const nextInsets = JSON.stringify(readerInsets);
@@ -901,6 +1574,10 @@ export default function ReaderScreen() {
     `);
   }, [readerInsets, readerPanelActive, readerUiActive]);
 
+  useEffect(() => {
+    applyReaderAnnotations();
+  }, [applyReaderAnnotations]);
+
   const saveNote = useCallback(async () => {
     if (!book || !currentChapter || !noteDraft.trim()) {
       return;
@@ -910,14 +1587,20 @@ export default function ReaderScreen() {
       bookId: book.id,
       chapterId: currentChapter.id,
       type: 'note',
+      selectedText: noteSelection?.selectedText,
       noteText: noteDraft.trim(),
-      position: JSON.stringify({ chapterId: currentChapter.id }),
+      position: JSON.stringify(
+        noteSelection
+          ? { offset: noteSelection.offset, quote: noteSelection.selectedText.slice(0, 140) }
+          : { chapterId: currentChapter.id }
+      ),
     });
     setNoteDraft('');
+    setNoteSelection(null);
     setAnnotations(await listAnnotations(db, book.id));
     showNotice('笔记已保存');
     setPanel('notes');
-  }, [book, currentChapter, db, noteDraft, showNotice]);
+  }, [book, currentChapter, db, noteDraft, noteSelection, showNotice]);
 
   const addBookmark = useCallback(async () => {
     if (!book || !currentChapter) {
@@ -985,28 +1668,48 @@ export default function ReaderScreen() {
     );
   }
 
-  const readerSource =
-    currentChapter.htmlPath && book.format === 'epub'
-      ? { uri: currentChapter.htmlPath }
-      : { html: readerHtmlForText(currentChapter, preferences) };
-
   return (
     <View style={[styles.screen, { backgroundColor: readerTheme.background }]}>
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
           <WebView
-            key={`${currentChapter.id}-${preferences.readerTheme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
+            key={`${preferences.readerTheme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
             ref={webViewRef}
             originWhitelist={['*']}
             source={readerSource}
             onMessage={handleWebMessage}
+            onLoadEnd={applyReaderAnnotations}
+            injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
             injectedJavaScript={injectedJavaScript}
             javaScriptEnabled
             showsVerticalScrollIndicator={false}
+            containerStyle={{ backgroundColor: readerTheme.background }}
             style={[styles.webView, { backgroundColor: readerTheme.background }]}
           />
         </View>
       </Link.AppleZoomTarget>
+
+      {textSelection && selectionMenuStyle && (
+        <Animated.View
+          entering={reduceMotion ? FadeIn.duration(80) : FadeIn.duration(120)}
+          exiting={reduceMotion ? FadeOut.duration(80) : FadeOut.duration(90)}
+          style={[styles.selectionToolbar, selectionMenuStyle, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
+          <M3Pressable onPress={copySelectedText} feedback="subtle" accessibilityLabel="复制选中内容" style={styles.selectionToolButton}>
+            <MaterialSymbol name="copy" color={chromeTheme.accent} description="复制" decorative size={17} />
+            <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>复制</Text>
+          </M3Pressable>
+          <View style={[styles.selectionToolDivider, { backgroundColor: chromeTheme.controlBorder }]} />
+          <M3Pressable onPress={saveSelectedHighlight} feedback="subtle" accessibilityLabel="保存划线" style={styles.selectionToolButton}>
+            <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" decorative size={17} />
+            <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>划线</Text>
+          </M3Pressable>
+          <View style={[styles.selectionToolDivider, { backgroundColor: chromeTheme.controlBorder }]} />
+          <M3Pressable onPress={startSelectionNote} feedback="subtle" accessibilityLabel="添加笔记" style={styles.selectionToolButton}>
+            <MaterialSymbol name="note" color={chromeTheme.accent} description="笔记" decorative size={17} />
+            <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>笔记</Text>
+          </M3Pressable>
+        </Animated.View>
+      )}
 
       {chromeVisible && (
         <Animated.View
@@ -1225,22 +1928,19 @@ export default function ReaderScreen() {
                       {currentBookmark ? '已标记当前章' : '收藏当前位置'}
                     </Text>
                   </M3Pressable>
-                  <M3Pressable
-                    onPress={() => webViewRef.current?.injectJavaScript('window.__INBOX_CAPTURE_SELECTION && window.__INBOX_CAPTURE_SELECTION(); true;')}
-                    feedback="standard"
-                    accessibilityRole="button"
-                    style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-                    <View style={styles.annotationActionHeader}>
-                      <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" decorative size={18} />
-                      <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>划线</Text>
-                    </View>
-                    <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>先选中文字</Text>
-                  </M3Pressable>
                 </View>
+                {noteSelection && (
+                  <View style={[styles.selectionQuoteCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                    <Text style={[styles.selectionQuoteLabel, { color: chromeTheme.accent }]}>选中原文</Text>
+                    <Text numberOfLines={3} style={[styles.selectionQuoteText, { color: chromeTheme.text }]}>
+                      {noteSelection.selectedText}
+                    </Text>
+                  </View>
+                )}
                 <TextInput
                   value={noteDraft}
                   onChangeText={setNoteDraft}
-                  placeholder="为本章写一条笔记"
+                  placeholder={noteSelection ? '写下这段文字的想法' : '为本章写一条笔记'}
                   placeholderTextColor={chromeTheme.muted}
                   multiline
                   style={[styles.panelInput, styles.noteInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
@@ -1407,6 +2107,37 @@ const styles = StyleSheet.create({
   },
   webView: {
     flex: 1,
+  },
+  selectionToolbar: {
+    position: 'absolute',
+    zIndex: 80,
+    elevation: 18,
+    minHeight: 44,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+    boxShadow: '0 12px 24px rgba(18, 20, 15, 0.18)',
+  },
+  selectionToolButton: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+  },
+  selectionToolText: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  selectionToolDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 24,
   },
   stateWrap: {
     flex: 1,
@@ -1789,6 +2520,25 @@ const styles = StyleSheet.create({
     color: brand.colors.muted,
     fontSize: 12,
     fontWeight: '800',
+    letterSpacing: 0,
+  },
+  selectionQuoteCard: {
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 5,
+  },
+  selectionQuoteLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  selectionQuoteText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
     letterSpacing: 0,
   },
   filterRow: {

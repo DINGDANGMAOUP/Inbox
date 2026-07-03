@@ -10,6 +10,7 @@ import CheckIcon from '@expo/material-symbols/check.xml';
 import CheckCircleIcon from '@expo/material-symbols/check_circle.xml';
 import ChevronRightIcon from '@expo/material-symbols/chevron_right.xml';
 import CloseIcon from '@expo/material-symbols/close.xml';
+import CopyIcon from '@expo/material-symbols/content_copy.xml';
 import DownloadIcon from '@expo/material-symbols/download.xml';
 import DrawIcon from '@expo/material-symbols/draw.xml';
 import ErrorIcon from '@expo/material-symbols/error.xml';
@@ -31,6 +32,7 @@ export const materialSymbolSources = {
   'chevron.left': ArrowBackIcon,
   'chevron.right': ArrowForwardIcon,
   close: CloseIcon,
+  copy: CopyIcon,
   download: DownloadIcon,
   error: ErrorIcon,
   highlighter: DrawIcon,
@@ -112,6 +114,8 @@ function iosSymbolName(name: MaterialSymbolName) {
       return 'checkmark.circle';
     case 'close':
       return 'xmark';
+    case 'copy':
+      return 'doc.on.doc';
     case 'download':
       return 'arrow.down';
     case 'error':

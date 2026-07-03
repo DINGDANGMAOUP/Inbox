@@ -32,6 +32,7 @@ import { deleteBook, importBook, listBooks } from '@/lib/reader-service';
 import type { LibraryBook, ResolvedAppTheme } from '@/types/reader';
 
 type LibraryFilter = 'all' | 'reading' | 'unread';
+type AppThemeToken = (typeof brand.appThemes)[ResolvedAppTheme];
 
 const libraryFilters: { value: LibraryFilter; label: string; icon: MaterialSymbolName }[] = [
   { value: 'all', label: '全部', icon: 'bookmark' },
@@ -48,29 +49,36 @@ function BrandSeal() {
 }
 
 function DrawerMenuItem({
+  theme,
   icon,
   title,
   detail,
   onPress,
 }: {
+  theme: AppThemeToken;
   icon: MaterialSymbolName;
   title: string;
   detail: string;
   onPress: () => void;
 }) {
   return (
-    <M3Pressable onPress={onPress} feedback="subtle" style={styles.drawerItem}>
-      <View style={styles.drawerItemIcon}>
-        <MaterialSymbol name={icon} color={brand.colors.copper} description={title} decorative size={18} />
+    <M3Pressable
+      onPress={onPress}
+      feedback="subtle"
+      accessibilityLabel={`${title}，${detail}`}
+      stateLayerColor="rgba(47, 107, 79, 0.14)"
+      style={[styles.drawerItem, { borderBottomColor: theme.line }]}>
+      <View style={[styles.drawerItemIcon, { backgroundColor: theme.surfaceContainer }]}>
+        <MaterialSymbol name={icon} color={theme.accent} description={title} decorative size={18} />
       </View>
       <View style={styles.drawerItemCopy}>
-        <Text style={styles.drawerItemTitle}>{title}</Text>
-        <Text numberOfLines={1} style={styles.drawerItemDetail}>
+        <Text style={[styles.drawerItemTitle, { color: theme.text }]}>{title}</Text>
+        <Text numberOfLines={1} style={[styles.drawerItemDetail, { color: theme.muted }]}>
           {detail}
         </Text>
       </View>
       <View style={styles.drawerItemArrow}>
-        <MaterialSymbol name="chevron.right" color={brand.colors.muted} description={`${title}菜单`} decorative size={17} />
+        <MaterialSymbol name="chevron.right" color={theme.muted} description={`${title}菜单`} decorative size={17} />
       </View>
     </M3Pressable>
   );
@@ -348,9 +356,13 @@ export default function LibraryScreen() {
         onPress={handleImport}
         disabled={importing}
         feedback="strong"
+        hitSlop={12}
+        pressRetentionOffset={16}
         accessibilityLabel={importing ? '导入中' : '导入书籍'}
-        style={[styles.floatingImportButton, { bottom: Math.max(10, insets.bottom + 6) }]}>
-        <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description={importing ? '导入中' : '导入书籍'} decorative size={19} />
+        style={[styles.floatingImportButton, { bottom: Math.max(20, insets.bottom + 18) }]}>
+        <View pointerEvents="none">
+          <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description={importing ? '导入中' : '导入书籍'} decorative size={22} />
+        </View>
       </M3Pressable>
       {menuOpen && (
         <Animated.View pointerEvents="box-none" style={styles.drawerLayer}>
@@ -364,36 +376,55 @@ export default function LibraryScreen() {
               styles.drawerPanel,
               {
                 paddingTop: Math.max(24, insets.top + 14),
-                backgroundColor: brand.colors.paper,
+                paddingBottom: Math.max(24, insets.bottom + 20),
+                backgroundColor: theme.surfaceSolid,
                 borderColor: theme.line,
               },
             ]}>
-            <View style={styles.drawerHeroCard}>
+            <View style={styles.drawerHeader}>
               <View style={styles.drawerBrand}>
                 <BrandSeal />
                 <View style={styles.drawerBrandCopy}>
-                  <Image source={brandAssets.wordmark} contentFit="contain" transition={160} style={styles.drawerWordmark} />
-                  <Text style={styles.drawerSubtitle}>私人书架</Text>
+                  <Text style={[styles.drawerBrandTitle, { color: theme.text }]}>墨屿</Text>
+                  <Text style={[styles.drawerSubtitle, { color: theme.muted }]}>私人书架</Text>
                 </View>
               </View>
-              <View style={styles.drawerStats}>
-                <View style={[styles.drawerStatPill, styles.drawerStatPillCool]}>
-                  <Text style={styles.drawerStatValue}>{books.length}</Text>
-                  <Text style={styles.drawerStatLabel}>藏书</Text>
-                </View>
-                <View style={[styles.drawerStatPill, styles.drawerStatPillWarm]}>
-                  <Text style={styles.drawerStatValue}>{startedCount}</Text>
-                  <Text style={styles.drawerStatLabel}>在读</Text>
-                </View>
+              <View pointerEvents="none" style={styles.drawerCloseButton}>
+                <View style={[styles.drawerCloseLine, styles.drawerCloseLineA, { backgroundColor: theme.muted }]} />
+                <View style={[styles.drawerCloseLine, styles.drawerCloseLineB, { backgroundColor: theme.muted }]} />
+              </View>
+              <Pressable
+                onPress={() => setMenuOpen(false)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="关闭菜单"
+                style={styles.drawerCloseHitTarget}
+              />
+            </View>
+
+            <View style={[styles.drawerSummary, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>
+              <View style={styles.drawerMetric}>
+                <Text style={[styles.drawerMetricValue, { color: theme.text }]}>{books.length}</Text>
+                <Text style={[styles.drawerMetricLabel, { color: theme.muted }]}>藏书</Text>
+              </View>
+              <View style={[styles.drawerMetricDivider, { backgroundColor: theme.line }]} />
+              <View style={styles.drawerMetric}>
+                <Text style={[styles.drawerMetricValue, { color: theme.text }]}>{startedCount}</Text>
+                <Text style={[styles.drawerMetricLabel, { color: theme.muted }]}>在读</Text>
               </View>
             </View>
+
             <View style={styles.drawerMenu}>
-              <Text style={styles.drawerSectionLabel}>菜单</Text>
-              <DrawerMenuItem icon="settings" title="设置" detail="阅读样式与主题" onPress={() => navigateFromDrawer('/settings')} />
-              <DrawerMenuItem icon="info" title="关于" detail="版本与应用信息" onPress={() => navigateFromDrawer('/about')} />
+              <Text style={[styles.drawerSectionLabel, { color: theme.accent }]}>菜单</Text>
+              <View style={[styles.drawerMenuList, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>
+                <DrawerMenuItem theme={theme} icon="settings" title="设置" detail="阅读样式" onPress={() => navigateFromDrawer('/settings')} />
+                <DrawerMenuItem theme={theme} icon="info" title="关于" detail="版本信息" onPress={() => navigateFromDrawer('/about')} />
+              </View>
             </View>
-            <View style={styles.drawerFooter}>
-              <Text style={styles.drawerFooterText}>本地阅读 · 私密保存</Text>
+
+            <View style={[styles.drawerFooter, { borderTopColor: theme.line }]}>
+              <MaterialSymbol name="bookmark" color={theme.accent} description="本地阅读" decorative size={16} />
+              <Text style={[styles.drawerFooterText, { color: theme.muted }]}>本地阅读 · 私密保存</Text>
             </View>
           </Animated.View>
         </Animated.View>
@@ -798,11 +829,12 @@ const styles = StyleSheet.create({
   },
   floatingImportButton: {
     position: 'absolute',
-    right: 8,
-    zIndex: 20,
-    width: 46,
-    height: 46,
-    borderRadius: brand.radius.medium,
+    right: 20,
+    zIndex: 60,
+    elevation: 14,
+    width: 56,
+    height: 56,
+    borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
@@ -817,7 +849,8 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    zIndex: 40,
+    zIndex: 100,
+    elevation: 30,
   },
   drawerBackdrop: {
     position: 'absolute',
@@ -825,36 +858,36 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(7, 9, 7, 0.46)',
+    backgroundColor: 'rgba(7, 9, 7, 0.54)',
   },
   drawerPanel: {
     position: 'absolute',
     left: 0,
     top: 0,
     bottom: 0,
-    width: '80%',
-    maxWidth: 320,
-    borderTopRightRadius: brand.radius.extraLarge,
-    borderBottomRightRadius: brand.radius.extraLarge,
+    zIndex: 1,
+    elevation: 31,
+    width: '82%',
+    maxWidth: 336,
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
     borderCurve: 'continuous',
     borderRightWidth: 1,
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-    gap: 16,
-    boxShadow: '14px 0 28px rgba(7, 9, 7, 0.16)',
+    paddingHorizontal: 20,
+    gap: 22,
+    boxShadow: '12px 0 24px rgba(7, 9, 7, 0.18)',
   },
-  drawerHeroCard: {
-    borderRadius: brand.radius.large,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(18, 20, 15, 0.08)',
-    backgroundColor: 'rgba(255, 252, 244, 0.72)',
-    padding: 14,
-    gap: 16,
-    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.06)',
+  drawerHeader: {
+    position: 'relative',
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
   },
   drawerBrand: {
-    minHeight: 52,
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -864,88 +897,103 @@ const styles = StyleSheet.create({
     gap: 2,
     minWidth: 0,
   },
-  drawerWordmark: {
-    width: 126,
-    height: 42,
-    marginLeft: -4,
+  drawerBrandTitle: {
+    fontSize: 22,
+    lineHeight: 26,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   drawerSubtitle: {
-    color: brand.colors.muted,
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0,
   },
-  drawerStats: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  drawerStatPill: {
-    flex: 1,
-    minHeight: 62,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+  drawerCloseButton: {
+    zIndex: 2,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  drawerStatPillCool: {
-    backgroundColor: '#DCEEDF',
+  drawerCloseLine: {
+    position: 'absolute',
+    width: 18,
+    height: 2,
+    borderRadius: 1,
   },
-  drawerStatPillWarm: {
-    backgroundColor: '#EEE9BD',
+  drawerCloseLineA: {
+    transform: [{ rotate: '45deg' }],
   },
-  drawerStatValue: {
-    color: brand.colors.ink,
-    fontSize: 25,
-    lineHeight: 28,
+  drawerCloseLineB: {
+    transform: [{ rotate: '-45deg' }],
+  },
+  drawerCloseHitTarget: {
+    position: 'absolute',
+    top: -10,
+    right: -10,
+    zIndex: 10,
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+  },
+  drawerSummary: {
+    minHeight: 72,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  drawerMetric: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: 2,
+  },
+  drawerMetricDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 36,
+  },
+  drawerMetricValue: {
+    fontSize: 26,
+    lineHeight: 30,
     fontWeight: '900',
     letterSpacing: 0,
   },
-  drawerStatLabel: {
-    color: brand.colors.muted,
+  drawerMetricLabel: {
     fontSize: 11,
-    fontWeight: '900',
+    lineHeight: 15,
+    fontWeight: '800',
     letterSpacing: 0,
   },
   drawerMenu: {
-    borderRadius: brand.radius.large,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: 'rgba(18, 20, 15, 0.08)',
-    backgroundColor: 'rgba(255, 252, 244, 0.78)',
-    padding: 8,
-    gap: 6,
-    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.05)',
+    gap: 8,
   },
   drawerSectionLabel: {
-    color: brand.colors.copper,
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0,
-    paddingHorizontal: 8,
-    paddingTop: 2,
-    paddingBottom: 4,
+    paddingHorizontal: 0,
+  },
+  drawerMenuList: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   drawerItem: {
-    minHeight: 58,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    backgroundColor: 'rgba(248, 245, 236, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(18, 20, 15, 0.07)',
+    minHeight: 64,
+    borderRadius: 0,
+    borderWidth: 0,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 10,
+    gap: 12,
+    paddingVertical: 10,
   },
   drawerItemIcon: {
     width: 36,
     height: 36,
-    borderRadius: brand.radius.small,
+    borderRadius: 12,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#DCEEDF',
   },
   drawerItemCopy: {
     flex: 1,
@@ -953,36 +1001,32 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   drawerItemTitle: {
-    color: brand.colors.ink,
-    fontSize: 16,
-    fontWeight: '900',
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '800',
     letterSpacing: 0,
   },
   drawerItemDetail: {
-    color: brand.colors.muted,
-    fontSize: 12,
+    fontSize: 11,
+    lineHeight: 16,
     fontWeight: '800',
     letterSpacing: 0,
   },
   drawerItemArrow: {
-    width: 28,
-    height: 28,
-    borderRadius: brand.radius.round,
+    width: 24,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(18, 20, 15, 0.04)',
   },
   drawerFooter: {
     marginTop: 'auto',
-    minHeight: 40,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
+    minHeight: 52,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(18, 20, 15, 0.04)',
+    gap: 8,
   },
   drawerFooterText: {
-    color: brand.colors.muted,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0,
