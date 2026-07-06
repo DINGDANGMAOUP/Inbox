@@ -14,6 +14,19 @@ export function safeFileName(input: string) {
 }
 
 export function hashBytes(bytes: Uint8Array, seed = 5381) {
+  let hashA = 2166136261;
+  let hashB = seed;
+
+  for (const byte of bytes) {
+    hashA ^= byte;
+    hashA = Math.imul(hashA, 16777619);
+    hashB = Math.imul(hashB, 33) ^ byte;
+  }
+
+  return `${bytes.length.toString(36)}_${(hashA >>> 0).toString(36)}_${(hashB >>> 0).toString(36)}`;
+}
+
+export function legacyHashBytes(bytes: Uint8Array, seed = 5381) {
   let hash = seed;
   const step = Math.max(1, Math.floor(bytes.length / 250000));
 

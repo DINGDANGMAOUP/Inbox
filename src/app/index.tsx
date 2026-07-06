@@ -220,6 +220,7 @@ export default function LibraryScreen() {
         <View style={styles.topAppBar}>
           <View style={styles.brandRow}>
             <M3Pressable
+              captureTouches
               onPress={() => setMenuOpen(true)}
               feedback="subtle"
               hitSlop={8}

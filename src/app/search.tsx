@@ -127,7 +127,7 @@ export default function SearchScreen() {
                 style={[styles.searchInput, { color: theme.text }]}
               />
               {query ? (
-                <M3Pressable onPress={() => setQuery('')} feedback="subtle" accessibilityLabel="清除搜索" style={styles.clearButton}>
+                <M3Pressable captureTouches hitSlop={8} onPress={() => setQuery('')} feedback="subtle" accessibilityLabel="清除搜索" style={styles.clearButton}>
                   <MaterialSymbol name="close" color={theme.muted} description="清除搜索" decorative size={17} />
                 </M3Pressable>
               ) : null}

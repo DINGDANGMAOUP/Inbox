@@ -310,6 +310,8 @@ export function M3Stepper({
       <View style={styles.stepperControls}>
         <M3Pressable
           accessibilityLabel={`减少${label}`}
+          captureTouches
+          hitSlop={8}
           onPress={onMinus}
           feedback="strong"
           style={[styles.roundControl, { backgroundColor: controlBackground }]}>
@@ -320,6 +322,8 @@ export function M3Stepper({
         </View>
         <M3Pressable
           accessibilityLabel={`增加${label}`}
+          captureTouches
+          hitSlop={8}
           onPress={onPlus}
           feedback="strong"
           style={[styles.roundControl, { backgroundColor: controlBackground }]}>
@@ -352,9 +356,10 @@ export function M3FilterChip({
 
   return (
     <M3Pressable
+      captureTouches
       onPress={onPress}
       feedback={selected ? 'subtle' : 'standard'}
-          stateLayerColor={selected ? 'rgba(255, 255, 255, 0.18)' : 'rgba(205, 232, 208, 0.18)'}
+      stateLayerColor={selected ? 'rgba(255, 255, 255, 0.18)' : 'rgba(205, 232, 208, 0.18)'}
       style={[
         styles.filterChip,
         compact && styles.filterChipCompact,
@@ -386,6 +391,7 @@ export function M3SegmentedControl<Value extends string>({
         return (
           <M3Pressable
             key={option.value}
+            captureTouches
             onPress={() => onChange(option.value)}
             feedback={active ? 'subtle' : 'standard'}
             stateLayerColor={active ? 'rgba(255, 255, 255, 0.18)' : 'rgba(205, 232, 208, 0.16)'}

@@ -1,11 +1,13 @@
 import { Directory, File, Paths } from "expo-file-system";
 import type { SQLiteDatabase } from "expo-sqlite";
 
-import { parseEpub, type ParsedBook } from "@/lib/epub-parser";
+import { decodeBookText, hasDecodeDamage } from "@/lib/book-text-decoder";
+import { EPUB_LAYOUT_MARKER, parseEpub, type ParsedBook } from "@/lib/epub-parser";
 import {
   cleanChapterTitle,
   excerptAround,
   hashBytes,
+  legacyHashBytes,
   makeId,
   safeFileName,
   splitTxtIntoChapters,
@@ -61,6 +63,16 @@ type AnnotationRow = {
   position: string;
   created_at: string;
   updated_at: string;
+};
+
+type StoredChapter = {
+  id: string;
+  href: string;
+  title: string;
+  order: number;
+  htmlPath: string | null;
+  text: string;
+  wordCount: number;
 };
 
 const readerDirectory = new Directory(Paths.document, "inbox-reader");
@@ -155,6 +167,19 @@ function ensureReaderDirectory() {
   readerDirectory.create({ idempotent: true, intermediates: true });
 }
 
+function fileInDirectory(root: Directory, path: string) {
+  const parts = path.split("/").filter(Boolean);
+  const fileName = parts.pop() ?? "file";
+  let directory = root;
+
+  for (const part of parts) {
+    directory = new Directory(directory, part);
+    directory.create({ idempotent: true, intermediates: true });
+  }
+
+  return new File(directory, fileName);
+}
+
 async function copyPickedFileToPrivateFile(
   pickedFile: File,
   originalName: string,
@@ -172,6 +197,40 @@ async function copyPickedFileToPrivateFile(
   return { tempDir, tempFile, bytes };
 }
 
+function writeParsedChapters(
+  parsed: ParsedBook,
+  bookDir: Directory,
+  id: string,
+  existingRows: ChapterRow[] = [],
+): StoredChapter[] {
+  return parsed.chapters.map((chapter, index) => {
+    const existing = existingRows.find((row) => row.href === chapter.href) ?? existingRows.find((row) => row.chapter_order === chapter.order);
+    const htmlPath =
+      parsed.format === "epub"
+        ? fileInDirectory(bookDir, `epub/${chapter.href || `chapter-${String(index + 1).padStart(4, "0")}.html`}`)
+        : null;
+
+    if (htmlPath) {
+      htmlPath.create({ overwrite: true, intermediates: true });
+      htmlPath.write(chapter.html);
+    }
+
+    return {
+      ...chapter,
+      id: existing?.id ?? `${id}_${chapter.id}`,
+      htmlPath: htmlPath?.uri ?? null,
+    };
+  });
+}
+
+function writeParsedResources(parsed: ParsedBook, bookDir: Directory) {
+  for (const resource of parsed.resources ?? []) {
+    const file = fileInDirectory(bookDir, `epub/${resource.path}`);
+    file.create({ overwrite: true, intermediates: true });
+    file.write(resource.bytes);
+  }
+}
+
 async function writeParsedBookFiles(
   parsed: ParsedBook,
   importedFile: File,
@@ -184,27 +243,8 @@ async function writeParsedBookFiles(
   const storedName = safeFileName(originalName);
   const storedFile = new File(bookDir, storedName);
   await importedFile.copy(storedFile, { overwrite: true });
-
-  const chapters = parsed.chapters.map((chapter, index) => {
-    const htmlPath =
-      parsed.format === "epub"
-        ? new File(
-            bookDir,
-            `chapter-${String(index + 1).padStart(4, "0")}.html`,
-          )
-        : null;
-
-    if (htmlPath) {
-      htmlPath.create({ overwrite: true, intermediates: true });
-      htmlPath.write(chapter.html);
-    }
-
-    return {
-      ...chapter,
-      id: `${id}_${chapter.id}`,
-      htmlPath: htmlPath?.uri ?? null,
-    };
-  });
+  writeParsedResources(parsed, bookDir);
+  const chapters = writeParsedChapters(parsed, bookDir, id);
 
   return {
     id,
@@ -213,11 +253,41 @@ async function writeParsedBookFiles(
   };
 }
 
-async function parseTxt(
-  source: File,
+async function insertChapters(
+  db: SQLiteDatabase,
+  bookId: string,
+  chapters: StoredChapter[],
+) {
+  for (const chapter of chapters) {
+    await db.runAsync(
+      `INSERT INTO chapters (id, book_id, href, title, chapter_order, html_path, text_content, word_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      chapter.id,
+      bookId,
+      chapter.href,
+      chapter.title,
+      chapter.order,
+      chapter.htmlPath,
+      chapter.text,
+      chapter.wordCount,
+    );
+
+    await db.runAsync(
+      `INSERT INTO search_index (book_id, chapter_id, chapter_title, content)
+       VALUES (?, ?, ?, ?)`,
+      bookId,
+      chapter.id,
+      chapter.title,
+      chapter.text,
+    );
+  }
+}
+
+function parseTxt(
+  bytes: Uint8Array,
   fallbackName: string,
-): Promise<ParsedBook> {
-  const text = await source.text();
+): ParsedBook {
+  const text = decodeBookText(bytes);
   const fallbackTitle = fallbackName.replace(/\.(txt|text)$/i, "").trim();
   const firstTextTitle = text
     .split(/\r?\n/)
@@ -284,16 +354,17 @@ export async function importBook(db: SQLiteDatabase) {
   );
   const contentHash = hashBytes(bytes);
   const id = `book_${contentHash}`;
+  const legacyId = `book_${legacyHashBytes(bytes)}`;
   const parsed =
     inferredFormat === "epub"
       ? parseEpub(bytes, originalName)
-      : await parseTxt(tempFile, originalName);
+      : parseTxt(bytes, originalName);
   const now = new Date().toISOString();
 
   const existing = await db.getFirstAsync<{ id: string }>(
-    "SELECT id FROM books WHERE id = ? OR id LIKE ? ORDER BY imported_at ASC LIMIT 1",
+    "SELECT id FROM books WHERE id IN (?, ?) ORDER BY imported_at ASC LIMIT 1",
     id,
-    `${id}_%`,
+    legacyId,
   );
   if (existing) {
     if (tempDir.exists) {
@@ -322,29 +393,7 @@ export async function importBook(db: SQLiteDatabase) {
       stored.chapters.length,
     );
 
-    for (const chapter of stored.chapters) {
-      await db.runAsync(
-        `INSERT INTO chapters (id, book_id, href, title, chapter_order, html_path, text_content, word_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        chapter.id,
-        stored.id,
-        chapter.href,
-        chapter.title,
-        chapter.order,
-        chapter.htmlPath,
-        chapter.text,
-        chapter.wordCount,
-      );
-
-      await db.runAsync(
-        `INSERT INTO search_index (book_id, chapter_id, chapter_title, content)
-         VALUES (?, ?, ?, ?)`,
-        stored.id,
-        chapter.id,
-        chapter.title,
-        chapter.text,
-      );
-    }
+    await insertChapters(db, stored.id, stored.chapters);
   });
 
   return getBook(db, stored.id);
@@ -374,12 +423,95 @@ export async function getBook(db: SQLiteDatabase, id: string) {
   return row ? mapBook(row) : null;
 }
 
-export async function getChapters(db: SQLiteDatabase, bookId: string) {
-  const rows = await db.getAllAsync<ChapterRow>(
+async function getChapterRows(db: SQLiteDatabase, bookId: string) {
+  return db.getAllAsync<ChapterRow>(
     "SELECT * FROM chapters WHERE book_id = ? ORDER BY chapter_order ASC",
     bookId,
   );
+}
+
+export async function getChapters(db: SQLiteDatabase, bookId: string) {
+  const rows = await getChapterRows(db, bookId);
   return rows.map(mapChapter);
+}
+
+function fileNameFromUri(uri: string, fallback: string) {
+  const name = uri.split("/").pop();
+  try {
+    return name ? decodeURIComponent(name) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function replaceBookContents(
+  db: SQLiteDatabase,
+  book: Book,
+  parsed: ParsedBook,
+) {
+  const bookDir = new Directory(readerDirectory, book.id);
+  bookDir.create({ idempotent: true, intermediates: true });
+  writeParsedResources(parsed, bookDir);
+  const existingRows = await getChapterRows(db, book.id);
+  const chapters = writeParsedChapters(parsed, bookDir, book.id, existingRows);
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM search_index WHERE book_id = ?", book.id);
+    await db.runAsync("DELETE FROM chapters WHERE book_id = ?", book.id);
+    await db.runAsync(
+      `UPDATE books
+          SET title = ?, author = ?, format = ?, total_chapters = ?
+        WHERE id = ?`,
+      parsed.title,
+      parsed.author,
+      parsed.format,
+      chapters.length,
+      book.id,
+    );
+    await insertChapters(db, book.id, chapters);
+  });
+}
+
+async function shouldRefreshEpubLayout(book: Book, rows: ChapterRow[]) {
+  if (book.format !== "epub") {
+    return false;
+  }
+
+  const firstHtmlPath = rows.find((row) => row.html_path)?.html_path;
+  if (!firstHtmlPath) {
+    return true;
+  }
+
+  try {
+    return !(await new File(firstHtmlPath).text()).includes(EPUB_LAYOUT_MARKER);
+  } catch {
+    return true;
+  }
+}
+
+async function refreshDecodedChaptersIfNeeded(
+  db: SQLiteDatabase,
+  book: Book,
+  rows: ChapterRow[],
+) {
+  const needsLayoutRefresh = await shouldRefreshEpubLayout(book, rows);
+  if (!needsLayoutRefresh && !rows.some((row) => hasDecodeDamage(row.title) || hasDecodeDamage(row.text_content))) {
+    return { chapters: rows.map(mapChapter), refreshed: false };
+  }
+
+  try {
+    const source = new File(book.fileUri);
+    const bytes = await source.bytes();
+    const fallbackName = fileNameFromUri(book.fileUri, `${book.title}.${book.format}`);
+    const parsed =
+      book.format === "epub"
+        ? parseEpub(bytes, fallbackName)
+        : parseTxt(bytes, fallbackName);
+    await replaceBookContents(db, book, parsed);
+    return { chapters: (await getChapterRows(db, book.id)).map(mapChapter), refreshed: true };
+  } catch {
+    return { chapters: rows.map(mapChapter), refreshed: false };
+  }
 }
 
 export async function getProgress(db: SQLiteDatabase, bookId: string) {
@@ -398,9 +530,13 @@ export async function openBook(db: SQLiteDatabase, bookId: string) {
     bookId,
   );
   const book = await getBook(db, bookId);
-  const chapters = await getChapters(db, bookId);
+  const rows = await getChapterRows(db, bookId);
+  const decoded = book
+    ? await refreshDecodedChaptersIfNeeded(db, book, rows)
+    : { chapters: rows.map(mapChapter), refreshed: false };
+  const openedBook = decoded.refreshed ? await getBook(db, bookId) : book;
   const progress = await getProgress(db, bookId);
-  return { book, chapters, progress };
+  return { book: openedBook, chapters: decoded.chapters, progress };
 }
 
 export async function saveProgress(

@@ -9,7 +9,6 @@ import {
   Alert,
   BackHandler,
   Keyboard,
-  type LayoutChangeEvent,
   ScrollView,
   StyleSheet,
   Text,
@@ -283,7 +282,7 @@ function initialReaderPositionScript(preferences: ReaderPreferences, restoreRati
         return Math.max(1, window.innerWidth);
       }
       function pageCount() {
-        return Math.max(1, Math.round(Math.max(0, document.documentElement.scrollWidth - window.innerWidth) / pageStep()) + 1);
+        return Math.max(1, Math.round(Math.max(0, Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0) - window.innerWidth) / pageStep()) + 1);
       }
       if (mode === "page") {
         var targetPage = Math.round(restoreRatio * Math.max(1, pageCount() - 1));
@@ -336,7 +335,8 @@ function preferenceScript(
   reduceMotion: boolean,
   readerUiActive: boolean,
   readerPanelActive: boolean,
-  readerInsets: ReaderInsets
+  readerInsets: ReaderInsets,
+  preserveLayout: boolean
 ) {
   const theme = brand.readerThemes[preferences.readerTheme];
   const initialInsets = {
@@ -345,6 +345,7 @@ function preferenceScript(
   };
   return `
     (function() {
+      var preserveLayout = ${preserveLayout ? 'true' : 'false'};
       var mode = "${preferences.readingMode}";
       var margin = ${preferences.margin};
       var reduceMotion = ${reduceMotion ? 'true' : 'false'};
@@ -363,7 +364,7 @@ function preferenceScript(
       }
 
       function maxHorizontalScroll() {
-        return Math.max(0, document.documentElement.scrollWidth - window.innerWidth);
+        return Math.max(0, Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0) - window.innerWidth);
       }
 
       function maxVerticalScroll() {
@@ -412,6 +413,27 @@ function preferenceScript(
         document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
         document.documentElement.style.setProperty("--reader-text", "${theme.text}");
         document.documentElement.style.background = "${theme.background}";
+        disableNativeSelection();
+        if (preserveLayout) {
+          if (mode === "page") {
+            document.documentElement.style.height = "100%";
+            document.documentElement.style.overflowX = "hidden";
+            document.documentElement.style.overflowY = "hidden";
+            document.body.style.boxSizing = "border-box";
+            document.body.style.minHeight = "100vh";
+            document.body.style.height = "100vh";
+            document.body.style.overflow = "visible";
+            document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+            document.body.style.columnGap = margin * 2 + "px";
+            document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+            document.body.style.webkitColumnGap = margin * 2 + "px";
+            return;
+          }
+          document.documentElement.style.height = "auto";
+          document.documentElement.style.overflowX = "hidden";
+          document.documentElement.style.overflowY = "auto";
+          return;
+        }
         document.body.style.background = "${theme.background}";
         document.body.style.color = "${theme.text}";
         document.body.style.fontSize = "${preferences.fontSize}px";
@@ -421,7 +443,6 @@ function preferenceScript(
         document.body.style.paddingRight = margin + "px";
         document.body.style.paddingTop = safeInsets.top + "px";
         document.body.style.paddingBottom = safeInsets.bottom + "px";
-        disableNativeSelection();
 
         if (mode === "page") {
           document.documentElement.style.height = "100%";
@@ -935,6 +956,13 @@ function preferenceScript(
             reportProgress();
           }, 80);
         });
+        window.addEventListener("load", function() {
+          applyMode();
+          setTimeout(function() {
+            restorePosition();
+            reportProgress();
+          }, 80);
+        }, { once: true });
       }
 
       function restorePosition() {
@@ -957,7 +985,7 @@ function preferenceScript(
   `;
 }
 
-function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio: number, readerInsets: ReaderInsets) {
+function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio: number, readerInsets: ReaderInsets, preserveLayout: boolean) {
   const theme = brand.readerThemes[preferences.readerTheme];
   const initialInsets = {
     top: Math.max(32, Math.round(readerInsets.top)),
@@ -965,6 +993,7 @@ function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio:
   };
   return `
     (function() {
+      var preserveLayout = ${preserveLayout ? 'true' : 'false'};
       var mode = "${preferences.readingMode}";
       var margin = ${preferences.margin};
       var restoreRatio = ${restoreRatio};
@@ -982,6 +1011,25 @@ function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio:
         document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
         document.documentElement.style.setProperty("--reader-text", "${theme.text}");
         if (!document.body) {
+          return;
+        }
+        if (preserveLayout) {
+          if (mode === "page") {
+            document.documentElement.style.height = "100%";
+            document.documentElement.style.overflowX = "hidden";
+            document.documentElement.style.overflowY = "hidden";
+            document.body.style.boxSizing = "border-box";
+            document.body.style.minHeight = "100vh";
+            document.body.style.height = "100vh";
+            document.body.style.overflow = "visible";
+            document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+            document.body.style.columnGap = margin * 2 + "px";
+            document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
+            document.body.style.webkitColumnGap = margin * 2 + "px";
+            window.scrollTo(Math.round(restoreRatio * Math.max(1, pageCount() - 1)) * pageStep(), 0);
+            return;
+          }
+          window.scrollTo(0, restoreRatio * Math.max(1, document.documentElement.scrollHeight - window.innerHeight));
           return;
         }
         document.body.style.background = "${theme.background}";
@@ -1069,6 +1117,7 @@ function ReaderToolChip({
 
   return (
     <M3Pressable
+      captureTouches
       onPress={onPress}
       feedback={active ? 'subtle' : 'standard'}
       accessibilityLabel={label}
@@ -1093,6 +1142,7 @@ export default function ReaderScreen() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const webViewRef = useRef<WebView>(null);
   const lastProgressSave = useRef(0);
+  const latestProgressRatio = useRef(0);
   const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -1118,8 +1168,6 @@ export default function ReaderScreen() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pageStatus, setPageStatus] = useState({ pageIndex: 1, pageCount: 1 });
-  const [topChromeHeight, setTopChromeHeight] = useState(0);
-  const [bottomChromeHeight, setBottomChromeHeight] = useState(0);
 
   const currentChapter = chapters[currentIndex];
   const themeToken = brand.readerThemes[preferences.readerTheme];
@@ -1225,16 +1273,6 @@ export default function ReaderScreen() {
     };
   }, [chromeBottomOffset, insets.top, textSelection, windowHeight, windowWidth]);
 
-  const handleTopChromeLayout = useCallback((event: LayoutChangeEvent) => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setTopChromeHeight((height) => (height === nextHeight ? height : nextHeight));
-  }, []);
-
-  const handleBottomChromeLayout = useCallback((event: LayoutChangeEvent) => {
-    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
-    setBottomChromeHeight((height) => (height === nextHeight ? height : nextHeight));
-  }, []);
-
   const closePanel = useCallback(() => {
     Keyboard.dismiss();
     setPanel(null);
@@ -1267,6 +1305,7 @@ export default function ReaderScreen() {
     setAnnotations(nextAnnotations);
     setCurrentIndex(progressIndex >= 0 ? progressIndex : 0);
     setRestoreRatio(progress?.scroll_ratio ?? 0);
+    latestProgressRatio.current = progress?.scroll_ratio ?? 0;
     setLoading(false);
   }, [db, id]);
 
@@ -1292,30 +1331,58 @@ export default function ReaderScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!panel) {
+  const flushProgress = useCallback(() => {
+    if (!book || !currentChapter) {
       return;
     }
 
+    void saveProgress(db, book.id, currentChapter.id, latestProgressRatio.current);
+  }, [book, currentChapter, db]);
+
+  const handleReaderBack = useCallback(() => {
+    flushProgress();
+    router.back();
+  }, [flushProgress]);
+
+  useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      closePanel();
-      return true;
+      if (panel) {
+        closePanel();
+        return true;
+      }
+
+      flushProgress();
+      return false;
     });
 
     return () => subscription.remove();
-  }, [closePanel, panel]);
+  }, [closePanel, flushProgress, panel]);
 
   useEffect(() => {
+    let cancelled = false;
     const handle = setTimeout(() => {
       if (!book || !searchQuery.trim()) {
         setSearchResults([]);
         return;
       }
 
-      searchBook(db, book.id, searchQuery).then(setSearchResults);
+      searchBook(db, book.id, searchQuery)
+        .then((results) => {
+          if (!cancelled) {
+            setSearchResults(results);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSearchResults([]);
+          }
+        });
     }, 180);
 
-    return () => clearTimeout(handle);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
   }, [book, db, searchQuery]);
 
   const commitProgress = useCallback(
@@ -1329,8 +1396,10 @@ export default function ReaderScreen() {
         return;
       }
 
+      const nextRatio = Math.max(0, Math.min(1, ratio));
+      latestProgressRatio.current = nextRatio;
       lastProgressSave.current = now;
-      await saveProgress(db, book.id, currentChapter.id, ratio);
+      await saveProgress(db, book.id, currentChapter.id, nextRatio);
     },
     [book, currentChapter, db]
   );
@@ -1346,7 +1415,8 @@ export default function ReaderScreen() {
       setPanel(null);
       setTextSelection(null);
       setNoteSelection(null);
-      saveProgress(db, book.id, chapters[index].id, ratio);
+      latestProgressRatio.current = ratio;
+      void saveProgress(db, book.id, chapters[index].id, ratio);
     },
     [book, chapters, db]
   );
@@ -1473,6 +1543,7 @@ export default function ReaderScreen() {
       }
 
       if (payload.type === 'progress' && typeof payload.ratio === 'number') {
+        latestProgressRatio.current = Math.max(0, Math.min(1, payload.ratio));
         if (preferences.readingMode === 'page' && (typeof payload.pageIndex !== 'number' || typeof payload.pageCount !== 'number')) {
           return;
         }
@@ -1542,23 +1613,24 @@ export default function ReaderScreen() {
 
   const readerUiActive = chromeVisible || panel !== null;
   const readerPanelActive = panel !== null;
+  const preserveEpubLayout = Boolean(book?.format === 'epub' && currentChapter?.htmlPath);
   const injectedJavaScript = useMemo(
-    () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive, readerPanelActive, readerInsets),
-    [preferences, readerInsets, readerPanelActive, readerUiActive, reduceMotion, restoreRatio]
+    () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive, readerPanelActive, readerInsets, preserveEpubLayout),
+    [preferences, preserveEpubLayout, readerInsets, readerPanelActive, readerUiActive, reduceMotion, restoreRatio]
   );
   const injectedJavaScriptBeforeContentLoaded = useMemo(
-    () => initialReaderLayoutScript(preferences, restoreRatio, readerInsets),
-    [preferences, readerInsets, restoreRatio]
+    () => initialReaderLayoutScript(preferences, restoreRatio, readerInsets, preserveEpubLayout),
+    [preferences, preserveEpubLayout, readerInsets, restoreRatio]
   );
   const readerSource = useMemo(() => {
     if (!book || !currentChapter) {
       return undefined;
     }
 
-    return currentChapter.htmlPath && book.format === 'epub'
+    return preserveEpubLayout && currentChapter.htmlPath
       ? { uri: currentChapter.htmlPath }
       : { html: readerHtmlForText(currentChapter, preferences, readerInsets, restoreRatio) };
-  }, [book, currentChapter, preferences, readerInsets, restoreRatio]);
+  }, [book, currentChapter, preferences, preserveEpubLayout, readerInsets, restoreRatio]);
 
   useEffect(() => {
     const nextInsets = JSON.stringify(readerInsets);
@@ -1660,7 +1732,7 @@ export default function ReaderScreen() {
               tone="quiet"
               tintColor={themeToken.text}
               style={{ backgroundColor: themeToken.surfaceContainerHigh, borderColor: themeToken.line }}
-              onPress={() => router.back()}
+              onPress={handleReaderBack}
             />
           </M3StatePanel>
         </View>
@@ -1694,17 +1766,17 @@ export default function ReaderScreen() {
           entering={reduceMotion ? FadeIn.duration(80) : FadeIn.duration(120)}
           exiting={reduceMotion ? FadeOut.duration(80) : FadeOut.duration(90)}
           style={[styles.selectionToolbar, selectionMenuStyle, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
-          <M3Pressable onPress={copySelectedText} feedback="subtle" accessibilityLabel="复制选中内容" style={styles.selectionToolButton}>
+          <M3Pressable captureTouches onPress={copySelectedText} feedback="subtle" accessibilityLabel="复制选中内容" style={styles.selectionToolButton}>
             <MaterialSymbol name="copy" color={chromeTheme.accent} description="复制" decorative size={17} />
             <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>复制</Text>
           </M3Pressable>
           <View style={[styles.selectionToolDivider, { backgroundColor: chromeTheme.controlBorder }]} />
-          <M3Pressable onPress={saveSelectedHighlight} feedback="subtle" accessibilityLabel="保存划线" style={styles.selectionToolButton}>
+          <M3Pressable captureTouches onPress={saveSelectedHighlight} feedback="subtle" accessibilityLabel="保存划线" style={styles.selectionToolButton}>
             <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" decorative size={17} />
             <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>划线</Text>
           </M3Pressable>
           <View style={[styles.selectionToolDivider, { backgroundColor: chromeTheme.controlBorder }]} />
-          <M3Pressable onPress={startSelectionNote} feedback="subtle" accessibilityLabel="添加笔记" style={styles.selectionToolButton}>
+          <M3Pressable captureTouches onPress={startSelectionNote} feedback="subtle" accessibilityLabel="添加笔记" style={styles.selectionToolButton}>
             <MaterialSymbol name="note" color={chromeTheme.accent} description="笔记" decorative size={17} />
             <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>笔记</Text>
           </M3Pressable>
@@ -1713,7 +1785,6 @@ export default function ReaderScreen() {
 
       {chromeVisible && (
         <Animated.View
-          onLayout={handleTopChromeLayout}
           entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeUp()}
           exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutUp()}
           style={[styles.topChrome, { top: chromeTopOffset }]}>
@@ -1725,7 +1796,7 @@ export default function ReaderScreen() {
               size="icon"
               tintColor={chromeTheme.text}
               style={[styles.backButton, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}
-              onPress={() => router.back()}
+              onPress={handleReaderBack}
             />
             <View style={styles.titleStack}>
               <Text numberOfLines={1} style={[styles.chromeTitle, { color: chromeTheme.text }]}>
@@ -1745,7 +1816,6 @@ export default function ReaderScreen() {
 
       {bottomDockVisible && (
         <Animated.View
-          onLayout={handleBottomChromeLayout}
           entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
           exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
           style={[styles.bottomChrome, { bottom: chromeBottomOffset }]}>
@@ -1816,6 +1886,7 @@ export default function ReaderScreen() {
                 return (
                   <M3Pressable
                     key={item.value}
+                    captureTouches
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
                     accessibilityLabel={item.label}
@@ -1910,6 +1981,7 @@ export default function ReaderScreen() {
               <View style={styles.panelBody}>
                 <View style={styles.annotationQuickActions}>
                   <M3Pressable
+                    captureTouches
                     onPress={addBookmark}
                     feedback={currentBookmark ? 'subtle' : 'standard'}
                     accessibilityRole="button"
@@ -2022,6 +2094,7 @@ export default function ReaderScreen() {
                   {brand.readerThemeOrder.map((theme) => (
                     <M3Pressable
                       key={theme}
+                      captureTouches
                       onPress={() => updatePreference({ ...preferences, readerTheme: theme })}
                       feedback={preferences.readerTheme === theme ? 'subtle' : 'standard'}
                       accessibilityRole="button"

@@ -53,8 +53,10 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
 
   try {
     const remote = await fetchLatestGithubRelease();
+    const versionDelta = compareVersions(remote.version, current.version);
+    const hasNewerBuild = versionDelta === 0 && remote.buildNumber > current.buildNumber;
 
-    if (compareVersions(remote.version, current.version) <= 0) {
+    if (versionDelta < 0 || (versionDelta === 0 && !hasNewerBuild)) {
       return {
         status: 'current',
         current,
