@@ -1,11 +1,16 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
-import { Linking } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as IntentLauncher from 'expo-intent-launcher';
+import { Linking, Platform } from 'react-native';
 
 const githubUpdates = Constants.expoConfig?.extra?.githubUpdates as { owner?: string; repo?: string } | undefined;
 const updateConfig = {
   owner: githubUpdates?.owner ?? 'DINGDANGMAOUP',
   repo: githubUpdates?.repo ?? 'Inbox',
 };
+const apkMimeType = 'application/vnd.android.package-archive';
+const androidViewAction = 'android.intent.action.VIEW';
+const flagGrantReadUriPermission = 1;
 
 export type InstalledAppVersion = {
   version: string;
@@ -18,9 +23,12 @@ export type RemoteAppVersion = {
   buildNumber: number;
   releaseNotes: string;
   force: boolean;
+  minSupportedBuild?: number;
   publishedAt?: string;
   tagName: string;
   releaseUrl: string;
+  apkUrl?: string;
+  apkSize?: number;
 };
 
 export type UpdateCheckResult =
@@ -79,23 +87,78 @@ export async function checkForGithubAppUpdate(): Promise<UpdateCheckResult> {
   }
 }
 
-export async function openReleasePage(remote?: RemoteAppVersion) {
-  const url = remote?.releaseUrl ?? getUpdateSourceInfo().latestReleaseUrl;
+export async function openUpdateDownloadLink(remote?: RemoteAppVersion) {
+  const url =
+    remote?.apkUrl ?? remote?.releaseUrl ?? getUpdateSourceInfo().latestReleaseUrl;
   await Linking.openURL(url);
+}
+
+export async function downloadAndOpenUpdateInstaller(remote: RemoteAppVersion) {
+  if (!remote.apkUrl) {
+    throw new Error('这个版本还没有上传安装包，请稍后再试。');
+  }
+
+  if (Platform.OS !== 'android') {
+    await openUpdateDownloadLink(remote);
+    return;
+  }
+
+  const rootDirectory =
+    FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+  if (!rootDirectory) {
+    await openUpdateDownloadLink(remote);
+    return;
+  }
+
+  const downloadDirectory = `${rootDirectory}updates/`;
+  await FileSystem.makeDirectoryAsync(downloadDirectory, {
+    intermediates: true,
+  });
+
+  const fileName = `Inbox-${sanitizeFileSegment(remote.version)}-${remote.buildNumber}.apk`;
+  const result = await FileSystem.downloadAsync(
+    remote.apkUrl,
+    `${downloadDirectory}${fileName}`,
+    {
+      headers: {
+        Accept: apkMimeType,
+      },
+    },
+  );
+
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`安装包下载失败：HTTP ${result.status}`);
+  }
+
+  const contentUri = await FileSystem.getContentUriAsync(result.uri);
+  await IntentLauncher.startActivityAsync(androidViewAction, {
+    data: contentUri,
+    flags: flagGrantReadUriPermission,
+    type: apkMimeType,
+  });
 }
 
 async function fetchLatestGithubRelease(): Promise<RemoteAppVersion> {
   const release = await fetchLatestRelease();
-  const version = normalizeReleaseVersion(release.tag_name || release.name);
+  const manifest = await fetchReleaseManifest(release).catch(() => undefined);
+  const version = normalizeReleaseVersion(
+    manifest?.version ?? release.tag_name ?? release.name,
+  );
 
   return {
     version,
-    buildNumber: parseReleaseBuildNumber(release.tag_name),
-    releaseNotes: release.body?.trim() || '这个版本没有填写更新说明。',
-    force: false,
-    publishedAt: release.published_at,
-    tagName: release.tag_name,
-    releaseUrl: release.html_url,
+    buildNumber: manifest?.buildNumber ?? parseReleaseBuildNumber(release.tag_name),
+    releaseNotes:
+      manifest?.releaseNotes?.trim() ||
+      release.body?.trim() ||
+      '这个版本没有填写更新说明。',
+    force: manifest?.force ?? false,
+    minSupportedBuild: manifest?.minSupportedBuild,
+    publishedAt: manifest?.publishedAt ?? release.published_at,
+    tagName: manifest?.tagName ?? release.tag_name,
+    releaseUrl: manifest?.releaseUrl ?? release.html_url,
+    apkUrl: manifest?.apkUrl,
+    apkSize: manifest?.apkSize,
   };
 }
 
@@ -110,6 +173,19 @@ type GithubRelease = {
     name: string;
     browser_download_url: string;
   }[];
+};
+
+type ReleaseManifest = {
+  version?: string;
+  buildNumber?: number;
+  minSupportedBuild?: number;
+  apkUrl?: string;
+  apkSize?: number;
+  releaseNotes?: string;
+  force?: boolean;
+  publishedAt?: string;
+  tagName?: string;
+  releaseUrl?: string;
 };
 
 async function fetchLatestRelease() {
@@ -130,12 +206,63 @@ async function fetchLatestRelease() {
   return (await response.json()) as GithubRelease;
 }
 
+async function fetchReleaseManifest(release: GithubRelease) {
+  const manifestAsset = release.assets.find(
+    (asset) => asset.name === 'latest.json',
+  );
+  if (!manifestAsset?.browser_download_url) {
+    return undefined;
+  }
+
+  const response = await fetch(manifestAsset.browser_download_url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`版本清单读取失败：HTTP ${response.status}`);
+  }
+
+  return sanitizeReleaseManifest((await response.json()) as ReleaseManifest);
+}
+
 function normalizeReleaseVersion(value?: string) {
   const version = value?.trim().replace(/^v/i, '');
   if (!version) {
     throw new Error('Release 缺少版本号。');
   }
   return version;
+}
+
+function sanitizeReleaseManifest(manifest: ReleaseManifest): ReleaseManifest {
+  return {
+    version: sanitizeString(manifest.version),
+    buildNumber: sanitizeNumber(manifest.buildNumber),
+    minSupportedBuild: sanitizeNumber(manifest.minSupportedBuild),
+    apkUrl: sanitizeString(manifest.apkUrl),
+    apkSize: sanitizeNumber(manifest.apkSize),
+    releaseNotes: sanitizeString(manifest.releaseNotes),
+    force: manifest.force === true,
+    publishedAt: sanitizeString(manifest.publishedAt),
+    tagName: sanitizeString(manifest.tagName),
+    releaseUrl: sanitizeString(manifest.releaseUrl),
+  };
+}
+
+function sanitizeString(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function sanitizeNumber(value: unknown) {
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function sanitizeFileSegment(value: string) {
+  return value.replace(/[^a-z0-9.+-]/gi, '-');
 }
 
 function parseReleaseBuildNumber(tagName: string) {

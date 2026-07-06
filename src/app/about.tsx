@@ -33,12 +33,20 @@ import { appThemeAssets } from "@/constants/theme-assets";
 import { useReaderPreferences } from "@/hooks/use-reader-preferences";
 import {
   checkForGithubAppUpdate,
+  downloadAndOpenUpdateInstaller,
   getInstalledAppVersion,
-  openReleasePage,
+  openUpdateDownloadLink,
+  type RemoteAppVersion,
 } from "@/lib/app-update-service";
 
 type UpdatePhase =
-  "idle" | "checking" | "current" | "available" | "unavailable" | "error";
+  | "idle"
+  | "checking"
+  | "downloading"
+  | "current"
+  | "available"
+  | "unavailable"
+  | "error";
 
 type AboutTheme = (typeof brand.appThemes)[keyof typeof brand.appThemes];
 
@@ -50,7 +58,7 @@ export default function AboutScreen() {
   const theme = brand.appThemes[resolvedAppTheme];
   const installedVersion = useMemo(() => getInstalledAppVersion(), []);
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
-  const [updateMessage, setUpdateMessage] = useState("检查 GitHub Releases");
+  const [updateMessage, setUpdateMessage] = useState("检查更新");
   const [lastCheckedAt, setLastCheckedAt] = useState<string | undefined>();
   const isDeepTheme = resolvedAppTheme === "deep";
   const topBarHeight = insets.top + 56;
@@ -70,13 +78,36 @@ export default function AboutScreen() {
     return () => subscription.remove();
   }, [handleBack]);
 
+  const handleDownloadUpdate = useCallback(async (remote: RemoteAppVersion) => {
+    setUpdatePhase("downloading");
+    setUpdateMessage("正在下载安装包");
+
+    try {
+      await downloadAndOpenUpdateInstaller(remote);
+      setUpdatePhase("available");
+      setUpdateMessage("已打开安装程序");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "安装包下载失败。";
+      setUpdatePhase("available");
+      setUpdateMessage("下载失败，可重试");
+      Alert.alert("下载失败", message, [
+        { text: "稍后", style: "cancel" },
+        {
+          text: "浏览器下载",
+          onPress: () => openUpdateDownloadLink(remote),
+        },
+      ]);
+    }
+  }, []);
+
   const checkUpdate = useCallback(async () => {
-    if (updatePhase === "checking") {
+    if (updatePhase === "checking" || updatePhase === "downloading") {
       return;
     }
 
     setUpdatePhase("checking");
-    setUpdateMessage("正在检查 GitHub Releases");
+    setUpdateMessage("正在检查更新");
     try {
       const result = await checkForGithubAppUpdate();
       setLastCheckedAt(new Date().toISOString());
@@ -97,8 +128,8 @@ export default function AboutScreen() {
         isUpdateSourceUnavailable(result.message)
       ) {
         setUpdatePhase("unavailable");
-        setUpdateMessage("暂时无法访问 Releases");
-        Alert.alert("检查失败", "暂时无法访问 GitHub Releases，可稍后再试。");
+        setUpdateMessage("暂时无法访问发布通道");
+        Alert.alert("检查失败", "暂时无法访问发布通道，可稍后再试。");
         return;
       }
 
@@ -118,15 +149,29 @@ export default function AboutScreen() {
       }
 
       if (result.status === "available") {
+        if (!result.remote.apkUrl) {
+          setUpdatePhase("unavailable");
+          setUpdateMessage("安装包准备中");
+          Alert.alert(
+            "新版本准备中",
+            "已经检测到新版本，但安装包还没有上传完成。等流水线构建结束后再检查一次即可。",
+          );
+          return;
+        }
+
         setUpdatePhase("available");
         Alert.alert(
           "发现新版本",
-          `最新版本 Version ${result.remote.version}\n\n${result.remote.releaseNotes}`,
+          `最新版本 Version ${result.remote.version}${formatUpdateSize(
+            result.remote.apkSize,
+          )}\n\n${result.remote.releaseNotes}`,
           [
             { text: "稍后", style: "cancel" },
             {
-              text: "查看 Releases",
-              onPress: () => openReleasePage(result.remote),
+              text: "下载更新",
+              onPress: () => {
+                void handleDownloadUpdate(result.remote);
+              },
             },
           ],
         );
@@ -137,15 +182,15 @@ export default function AboutScreen() {
         error instanceof Error ? error.message : "检查 Releases 失败。";
       if (isUpdateSourceUnavailable(message)) {
         setUpdatePhase("unavailable");
-        setUpdateMessage("暂时无法访问 Releases");
-        Alert.alert("检查失败", "暂时无法访问 GitHub Releases，可稍后再试。");
+        setUpdateMessage("暂时无法访问发布通道");
+        Alert.alert("检查失败", "暂时无法访问发布通道，可稍后再试。");
         return;
       }
       setUpdatePhase("error");
       setUpdateMessage(message);
       Alert.alert("检查失败", message);
     }
-  }, [updatePhase]);
+  }, [handleDownloadUpdate, updatePhase]);
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
@@ -257,10 +302,12 @@ export default function AboutScreen() {
                 lastCheckedAt,
               )}
               icon={updatePhaseIcon(updatePhase)}
-              disabled={updatePhase === "checking"}
+              disabled={
+                updatePhase === "checking" || updatePhase === "downloading"
+              }
               onPress={checkUpdate}
               trailing={
-                updatePhase === "checking" ? (
+                updatePhase === "checking" || updatePhase === "downloading" ? (
                   <ActivityIndicator color={theme.accent} />
                 ) : undefined
               }
@@ -376,8 +423,11 @@ function updateRowDetail(
   if (phase === "checking") {
     return "正在检查";
   }
+  if (phase === "downloading") {
+    return "正在下载";
+  }
   if (phase === "available") {
-    return "发现新版本";
+    return message || "发现新版本，可下载";
   }
   if (phase === "current") {
     if (message === "暂无正式版本") {
@@ -397,6 +447,8 @@ function updatePhaseIcon(phase: UpdatePhase): MaterialSymbolName {
   switch (phase) {
     case "checking":
       return "refresh";
+    case "downloading":
+      return "download";
     case "current":
       return "check.circle";
     case "error":
@@ -426,6 +478,14 @@ function formatCheckedAt(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatUpdateSize(bytes?: number) {
+  if (!bytes || bytes <= 0) {
+    return "";
+  }
+  const megabytes = bytes / 1024 / 1024;
+  return `\n安装包 ${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
 }
 
 const styles = StyleSheet.create({
