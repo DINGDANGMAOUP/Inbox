@@ -696,17 +696,29 @@ export async function updateReaderPreferences(
   );
 }
 
-export async function deleteBook(db: SQLiteDatabase, bookId: string) {
+export async function deleteBooks(db: SQLiteDatabase, bookIds: string[]) {
+  const ids = Array.from(new Set(bookIds)).filter(Boolean);
+  if (ids.length === 0) {
+    return;
+  }
+
+  const placeholders = ids.map(() => "?").join(", ");
   await db.withTransactionAsync(async () => {
-    await db.runAsync("DELETE FROM annotations WHERE book_id = ?", bookId);
-    await db.runAsync("DELETE FROM search_index WHERE book_id = ?", bookId);
-    await db.runAsync("DELETE FROM reading_progress WHERE book_id = ?", bookId);
-    await db.runAsync("DELETE FROM chapters WHERE book_id = ?", bookId);
-    await db.runAsync("DELETE FROM books WHERE id = ?", bookId);
+    await db.runAsync(`DELETE FROM annotations WHERE book_id IN (${placeholders})`, ...ids);
+    await db.runAsync(`DELETE FROM search_index WHERE book_id IN (${placeholders})`, ...ids);
+    await db.runAsync(`DELETE FROM reading_progress WHERE book_id IN (${placeholders})`, ...ids);
+    await db.runAsync(`DELETE FROM chapters WHERE book_id IN (${placeholders})`, ...ids);
+    await db.runAsync(`DELETE FROM books WHERE id IN (${placeholders})`, ...ids);
   });
 
-  const bookDir = new Directory(readerDirectory, bookId);
-  if (bookDir.exists) {
-    bookDir.delete();
+  for (const bookId of ids) {
+    const bookDir = new Directory(readerDirectory, bookId);
+    if (bookDir.exists) {
+      bookDir.delete();
+    }
   }
+}
+
+export async function deleteBook(db: SQLiteDatabase, bookId: string) {
+  await deleteBooks(db, [bookId]);
 }

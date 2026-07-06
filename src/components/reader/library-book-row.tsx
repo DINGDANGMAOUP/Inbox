@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { BookCover } from '@/components/reader/book-cover';
+import { MaterialSymbol } from '@/components/reader/material-symbol';
 import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { brand } from '@/constants/brand';
@@ -20,15 +21,22 @@ export function LibraryBookRow({
   book,
   index,
   theme,
-  onDelete,
+  selectionMode = false,
+  selected = false,
+  onSelect,
+  onStartSelection,
 }: {
   book: LibraryBook;
   index: number;
   theme: ResolvedAppTheme;
-  onDelete?: (book: LibraryBook) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onSelect?: (book: LibraryBook) => void;
+  onStartSelection?: (book: LibraryBook) => void;
 }) {
   const fillPercent = bookProgressPercent(book) ?? 0;
   const themeToken = brand.appThemes[theme];
+  const openBook = () => router.push({ pathname: '/reader/[id]', params: { id: book.id } });
 
   return (
     <Animated.View
@@ -37,13 +45,20 @@ export function LibraryBookRow({
       layout={m3Motion.layoutMedium()}
       style={styles.tile}>
       <M3Pressable
-        onPress={() => router.push({ pathname: '/reader/[id]', params: { id: book.id } })}
-        onLongPress={onDelete ? () => onDelete(book) : undefined}
+        onPress={() => (selectionMode ? onSelect?.(book) : openBook())}
+        onLongPress={() => onStartSelection?.(book)}
         feedback="subtle"
+        accessibilityState={{ selected }}
         style={[
           styles.tilePressable,
           { backgroundColor: themeToken.surfaceSolid, borderColor: themeToken.line },
+          selected && { borderColor: themeToken.accent, backgroundColor: themeToken.surface },
         ]}>
+        {selectionMode && (
+          <View style={[styles.selectionMark, { borderColor: selected ? themeToken.accent : themeToken.line, backgroundColor: selected ? themeToken.accent : themeToken.surfaceSolid }]}>
+            {selected && <MaterialSymbol name="check" color={themeToken.surfaceSolid} description="已选择" decorative size={18} />}
+          </View>
+        )}
         <BookCover book={book} size="small" theme={theme} />
         <View style={styles.tileCopy}>
           <View style={styles.tileTopRow}>
@@ -61,9 +76,11 @@ export function LibraryBookRow({
             <Text numberOfLines={1} style={[styles.progressText, { color: themeToken.muted }]}>
               {progressLabel(book)}
             </Text>
-            <View style={[styles.tileAction, { backgroundColor: themeToken.text }]}>
-              <Text style={[styles.tileStatus, { color: themeToken.surfaceSolid }]}>{statusLabel(book)}</Text>
-            </View>
+            {!selectionMode && (
+              <View style={[styles.tileAction, { backgroundColor: themeToken.text }]}>
+                <Text style={[styles.tileStatus, { color: themeToken.surfaceSolid }]}>{statusLabel(book)}</Text>
+              </View>
+            )}
           </View>
           <View style={[styles.progressTrack, { backgroundColor: themeToken.line }]}>
             <View style={[styles.progressFill, { width: `${fillPercent}%`, backgroundColor: themeToken.accent }]} />
@@ -88,6 +105,14 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 12,
     boxShadow: '0 6px 16px rgba(18, 20, 15, 0.06)',
+  },
+  selectionMark: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tileCopy: {
     flex: 1,

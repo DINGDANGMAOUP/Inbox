@@ -39,7 +39,6 @@ export function getInstalledAppVersion(): InstalledAppVersion {
     environment: Constants.executionEnvironment,
   };
 }
-
 export function getUpdateSourceInfo() {
   return {
     label: 'GitHub Releases',

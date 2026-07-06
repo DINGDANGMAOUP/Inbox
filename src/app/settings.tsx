@@ -10,7 +10,7 @@ import { useRouteSlideTransition } from '@/components/reader/route-slide-transit
 import { brand } from '@/constants/brand';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
-import type { AppThemeMode, ReaderPreferences, ReaderTheme, ResolvedAppTheme } from '@/types/reader';
+import type { ReaderPreferences, ReaderTheme, ResolvedAppTheme } from '@/types/reader';
 
 const readingModeCopy: Record<ReaderPreferences['readingMode'], { title: string; body: string }> = {
   scroll: { title: '滚动', body: '' },
@@ -20,23 +20,11 @@ const readingModeCopy: Record<ReaderPreferences['readingMode'], { title: string;
 type SettingsTheme = (typeof brand.appThemes)[ResolvedAppTheme];
 type ThemeChoiceSwatch = readonly [string, string, string];
 
-const appThemeModeCopy: Record<AppThemeMode, { title: string; body: string }> = {
-  system: { title: '跟随系统', body: '自动' },
-  mist: { title: '纸岛', body: '暖白' },
-  deep: { title: '夜岛', body: '黑色' },
-};
-
 const readerThemeCopy: Record<ReaderTheme, { title: string; body: string }> = {
   paper: { title: '纸页', body: '暖白' },
   sepia: { title: '暖笺', body: '柔和' },
   night: { title: '夜读', body: '暗色' },
   eink: { title: '墨白', body: '高对比' },
-};
-
-const appThemeSwatches: Record<AppThemeMode, ThemeChoiceSwatch> = {
-  system: ['#F8F5EC', '#10130E', '#D7E9D7'],
-  mist: ['#F8F5EC', '#EEE8DA', '#2F6B4F'],
-  deep: ['#0B0E0B', '#1A2118', '#D7E9D7'],
 };
 
 const readerThemeSwatches: Record<ReaderTheme, ThemeChoiceSwatch> = {
@@ -116,7 +104,7 @@ export default function SettingsScreen() {
             </View>
           </Pressable>
           <Text pointerEvents="none" numberOfLines={1} style={[styles.navTitle, { color: theme.text }]}>
-            设置
+            阅读器设置
           </Text>
         </View>
 
@@ -130,33 +118,14 @@ export default function SettingsScreen() {
             <>
               <View style={[styles.intro, { borderBottomColor: theme.line }]}>
                 <Text style={[styles.screenMeta, { color: theme.muted }]}>
-                  {appThemeModeCopy[preferences.appThemeMode].title} · {readerThemeCopy[preferences.readerTheme].title} · {readingModeCopy[preferences.readingMode].title}
+                  {readerThemeCopy[preferences.readerTheme].title} · {readingModeCopy[preferences.readingMode].title}
                 </Text>
                 <Text accessibilityLiveRegion="polite" style={[styles.saveStatus, { color: saving ? theme.accent : theme.muted }]}>
                   {saving ? '保存中' : '已保存'}
                 </Text>
               </View>
 
-              <SettingGroup theme={theme} title="界面主题" value={appThemeModeCopy[preferences.appThemeMode].title}>
-                {brand.appThemeModes.map((themeMode) => {
-                  const active = preferences.appThemeMode === themeMode;
-                  const copy = appThemeModeCopy[themeMode];
-                  return (
-                    <PreferenceChoice
-                      key={themeMode}
-                      theme={theme}
-                      title={copy.title}
-                      detail={copy.body}
-                      selected={active}
-                      swatch={appThemeSwatches[themeMode]}
-                      icon={themeMode === 'system' ? 'settings' : themeMode === 'mist' ? 'bookmark' : 'textformat.size'}
-                      onPress={() => updatePreference({ ...preferences, appThemeMode: themeMode })}
-                    />
-                  );
-                })}
-              </SettingGroup>
-
-              <SettingGroup theme={theme} title="阅读纸张" value={readerThemeCopy[preferences.readerTheme].title}>
+              <SettingGroup theme={theme} title="外观" value={readerThemeCopy[preferences.readerTheme].title}>
                 {brand.readerThemeOrder.map((readerTheme) => {
                   const active = preferences.readerTheme === readerTheme;
                   const copy = readerThemeCopy[readerTheme];

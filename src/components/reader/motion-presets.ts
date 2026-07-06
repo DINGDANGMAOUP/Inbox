@@ -3,6 +3,7 @@ import {
   FadeIn,
   FadeInDown,
   FadeOut,
+  Keyframe,
   LinearTransition,
   SlideInDown,
   SlideInUp,
@@ -26,6 +27,14 @@ export const m3Motion = {
   fadeShortOut: () => FadeOut.duration(motion.duration.short).easing(m3Easing.emphasizedAccelerate),
   fadeDown: (delay = 0) => FadeInDown.delay(delay).duration(motion.duration.medium).easing(m3Easing.emphasizedDecelerate),
   fadeDownShort: () => FadeInDown.duration(motion.duration.short).easing(m3Easing.standard),
+  bottomBarIn: () => new Keyframe({
+    0: { opacity: 0, transform: [{ translateY: 10 }] },
+    100: { opacity: 1, transform: [{ translateY: 0 }], easing: m3Easing.standard },
+  }).duration(motion.duration.short),
+  bottomBarOut: () => new Keyframe({
+    0: { opacity: 1, transform: [{ translateY: 0 }] },
+    100: { opacity: 0, transform: [{ translateY: 8 }], easing: m3Easing.emphasizedAccelerate },
+  }).duration(motion.duration.short),
   slideChromeUp: () => SlideInUp.duration(motion.duration.medium).easing(m3Easing.emphasizedDecelerate),
   slideChromeDown: () => SlideInDown.duration(motion.duration.medium).easing(m3Easing.emphasizedDecelerate),
   slideOutUp: () => SlideOutUp.duration(motion.duration.short).easing(m3Easing.emphasizedAccelerate),

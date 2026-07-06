@@ -73,6 +73,22 @@ export default function RootLayout() {
                 }}
               />
               <Stack.Screen
+                name="app-settings"
+                options={{
+                  animation: 'none',
+                  presentation: 'transparentModal',
+                  contentStyle: { backgroundColor: 'transparent' },
+                }}
+              />
+              <Stack.Screen
+                name="storage"
+                options={{
+                  animation: 'none',
+                  presentation: 'transparentModal',
+                  contentStyle: { backgroundColor: 'transparent' },
+                }}
+              />
+              <Stack.Screen
                 name="about"
                 options={{
                   animation: 'none',

@@ -28,7 +28,7 @@ import { motion } from '@/constants/motion';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
 import { authorLabel, bookProgressPercent, bookTitleLabel, hasReadingProgress, progressLabel } from '@/lib/library-book-labels';
-import { deleteBook, importBook, listBooks } from '@/lib/reader-service';
+import { deleteBooks, importBook, listBooks } from '@/lib/reader-service';
 import type { LibraryBook, ResolvedAppTheme } from '@/types/reader';
 
 type LibraryFilter = 'all' | 'reading' | 'unread';
@@ -130,6 +130,8 @@ export default function LibraryScreen() {
   const [importing, setImporting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedBookIds, setSelectedBookIds] = useState<Set<string>>(() => new Set());
   const activeTheme = resolvedAppTheme;
   const theme = brand.appThemes[activeTheme];
   const isDeepTheme = activeTheme === 'deep';
@@ -149,6 +151,9 @@ export default function LibraryScreen() {
   const startedCount = useMemo(() => {
     return books.filter(hasReadingProgress).length;
   }, [books]);
+  const selectedCount = selectedBookIds.size;
+  const allVisibleSelected = filteredBooks.length > 0 && filteredBooks.every((book) => selectedBookIds.has(book.id));
+  const selectedBooks = useMemo(() => books.filter((book) => selectedBookIds.has(book.id)), [books, selectedBookIds]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -181,26 +186,79 @@ export default function LibraryScreen() {
     }
   }, [db, refresh]);
 
-  const handleDelete = useCallback(
-    (book: LibraryBook) => {
-      Alert.alert('移除这本书？', `“${book.title}”及其本地笔记会从这台设备删除。`, [
+  const clearSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedBookIds(new Set());
+  }, []);
+
+  const startSelection = useCallback((book?: LibraryBook) => {
+    setSelectionMode(true);
+    setSelectedBookIds((current) => {
+      if (!book || current.has(book.id)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(book.id);
+      return next;
+    });
+  }, []);
+
+  const toggleBookSelection = useCallback((book: LibraryBook) => {
+    setSelectedBookIds((current) => {
+      const next = new Set(current);
+      if (next.has(book.id)) {
+        next.delete(book.id);
+      } else {
+        next.add(book.id);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleVisibleSelection = useCallback(() => {
+    setSelectedBookIds((current) => {
+      const next = new Set(current);
+      filteredBooks.forEach((book) => {
+        if (allVisibleSelected) {
+          next.delete(book.id);
+        } else {
+          next.add(book.id);
+        }
+      });
+      return next;
+    });
+  }, [allVisibleSelected, filteredBooks]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedBooks.length === 0) {
+      return;
+    }
+    const count = selectedBooks.length;
+    Alert.alert(`移除 ${count} 本书？`, '会删除墨屿应用内副本、笔记和阅读记录，不会删除原始文件。', [
         { text: '取消', style: 'cancel' },
         {
           text: '移除',
           style: 'destructive',
           onPress: async () => {
-            await deleteBook(db, book.id);
-            await refresh();
+            try {
+              await deleteBooks(db, selectedBooks.map((book) => book.id));
+              clearSelection();
+              await refresh();
+              setNotice(`已移除 ${count} 本书`);
+              setTimeout(() => setNotice(null), 3600);
+            } catch (error) {
+              Alert.alert('移除失败', error instanceof Error ? error.message : '无法移除所选书籍。');
+            }
           },
         },
       ]);
     },
-    [db, refresh]
+    [clearSelection, db, refresh, selectedBooks]
   );
 
-  const navigateFromDrawer = useCallback((path: '/settings' | '/about') => {
+  const navigateFromDrawer = useCallback((path: '/settings' | '/app-settings' | '/storage' | '/about') => {
     setMenuOpen(false);
-    router.push(path);
+    router.push(path as Href);
   }, []);
   const openSearch = useCallback(() => {
     router.push('/search' as Href);
@@ -311,7 +369,9 @@ export default function LibraryScreen() {
           <Text style={styles.sectionKickerDark}>LIBRARY</Text>
           <Text style={[styles.sectionTitle, { color: ambientTextColor }]}>书架</Text>
         </View>
-        <Text style={[styles.count, { color: ambientMutedColor }]}>{filteredBooks.length} 本书</Text>
+        <View style={styles.sectionActions}>
+          <Text style={[styles.count, { color: ambientMutedColor }]}>{selectionMode ? `${selectedCount} 已选` : `${filteredBooks.length} 本书`}</Text>
+        </View>
       </View>
       <View style={styles.filterRow}>
         {libraryFilters.map((item) => {
@@ -348,23 +408,53 @@ export default function LibraryScreen() {
       ) : (
         <View style={styles.shelfList}>
           {filteredBooks.map((book, index) => (
-            <LibraryBookRow key={book.id} book={book} index={index} theme={activeTheme} onDelete={handleDelete} />
+            <LibraryBookRow
+              key={book.id}
+              book={book}
+              index={index}
+              theme={activeTheme}
+              selectionMode={selectionMode}
+              selected={selectedBookIds.has(book.id)}
+              onSelect={toggleBookSelection}
+              onStartSelection={startSelection}
+            />
           ))}
         </View>
       )}
       </ScrollView>
-      <M3Pressable
-        onPress={handleImport}
-        disabled={importing}
-        feedback="strong"
-        hitSlop={12}
-        pressRetentionOffset={16}
-        accessibilityLabel={importing ? '导入中' : '导入书籍'}
-        style={[styles.floatingImportButton, { bottom: Math.max(20, insets.bottom + 18) }]}>
-        <View pointerEvents="none">
-          <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description={importing ? '导入中' : '导入书籍'} decorative size={22} />
-        </View>
-      </M3Pressable>
+      {!selectionMode && (
+        <M3Pressable
+          onPress={handleImport}
+          disabled={importing}
+          feedback="strong"
+          hitSlop={12}
+          pressRetentionOffset={16}
+          accessibilityLabel={importing ? '导入中' : '导入书籍'}
+          style={[styles.floatingImportButton, { bottom: Math.max(20, insets.bottom + 18) }]}>
+          <View pointerEvents="none">
+            <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description={importing ? '导入中' : '导入书籍'} decorative size={22} />
+          </View>
+        </M3Pressable>
+      )}
+      {selectionMode && (
+        <Animated.View entering={m3Motion.bottomBarIn()} exiting={m3Motion.bottomBarOut()} style={[styles.selectionBar, { bottom: Math.max(16, insets.bottom + 14), backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+          <View style={styles.selectionBarCopy}>
+            <Text style={[styles.selectionBarTitle, { color: theme.text }]}>{selectedCount} 本已选</Text>
+            <Text style={[styles.selectionBarDetail, { color: theme.muted }]}>仅移除应用内副本</Text>
+          </View>
+          <View style={styles.selectionBarActions}>
+            <M3Pressable captureTouches feedback="subtle" hitSlop={8} accessibilityLabel="取消选择模式" style={[styles.selectionActionButton, { backgroundColor: theme.surface, borderColor: theme.line }]} onPress={clearSelection}>
+              <Text style={[styles.selectionActionText, { color: theme.text }]}>取消</Text>
+            </M3Pressable>
+            <M3Pressable captureTouches feedback="subtle" hitSlop={8} accessibilityLabel={allVisibleSelected ? '清空选择' : '全选当前列表'} style={[styles.selectionActionButton, { backgroundColor: theme.surface, borderColor: theme.line }]} onPress={toggleVisibleSelection}>
+              <Text style={[styles.selectionActionText, { color: theme.text }]}>{allVisibleSelected ? '清空' : '全选'}</Text>
+            </M3Pressable>
+            <M3Pressable captureTouches feedback="strong" hitSlop={8} disabled={selectedCount === 0} accessibilityLabel="移除所选书籍" style={[styles.selectionDeleteButton, { backgroundColor: theme.error }]} onPress={handleDeleteSelected}>
+              <Text style={styles.selectionDeleteText}>移除</Text>
+            </M3Pressable>
+          </View>
+        </Animated.View>
+      )}
       {menuOpen && (
         <Animated.View pointerEvents="box-none" style={styles.drawerLayer}>
           <Animated.View entering={FadeIn.duration(motion.duration.short)} exiting={FadeOut.duration(motion.duration.short)} style={styles.drawerBackdrop}>
@@ -416,10 +506,12 @@ export default function LibraryScreen() {
             </View>
 
             <View style={styles.drawerMenu}>
-              <Text style={[styles.drawerSectionLabel, { color: theme.accent }]}>菜单</Text>
+              <Text style={[styles.drawerSectionLabel, { color: theme.accent }]}>导航</Text>
               <View style={[styles.drawerMenuList, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>
-                <DrawerMenuItem theme={theme} icon="settings" title="设置" detail="阅读样式" onPress={() => navigateFromDrawer('/settings')} />
-                <DrawerMenuItem theme={theme} icon="info" title="关于" detail="版本信息" onPress={() => navigateFromDrawer('/about')} />
+                <DrawerMenuItem theme={theme} icon="textformat.size" title="阅读器设置" detail="外观、排版和阅读方式" onPress={() => navigateFromDrawer('/settings')} />
+                <DrawerMenuItem theme={theme} icon="settings" title="应用设置" detail="界面主题和应用管理" onPress={() => navigateFromDrawer('/app-settings')} />
+                <DrawerMenuItem theme={theme} icon="storage" title="存储空间" detail="占用、缓存和阅读数据" onPress={() => navigateFromDrawer('/storage')} />
+                <DrawerMenuItem theme={theme} icon="info" title="关于墨屿" detail="版本、更新和协议" onPress={() => navigateFromDrawer('/about')} />
               </View>
             </View>
 
@@ -799,6 +891,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  sectionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   filterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -843,6 +940,75 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.42)',
     boxShadow: '0 16px 30px rgba(18, 20, 15, 0.20)',
+  },
+  selectionBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 70,
+    elevation: 20,
+    minHeight: 72,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    boxShadow: '0 16px 30px rgba(18, 20, 15, 0.20)',
+  },
+  selectionBarCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  selectionBarTitle: {
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  selectionBarDetail: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  selectionBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  selectionActionButton: {
+    minHeight: 44,
+    minWidth: 58,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionActionText: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  selectionDeleteButton: {
+    minHeight: 44,
+    minWidth: 62,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionDeleteText: {
+    color: brand.colors.white,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   drawerLayer: {
     position: 'absolute',

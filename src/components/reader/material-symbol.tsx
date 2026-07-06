@@ -10,11 +10,16 @@ import CheckIcon from '@expo/material-symbols/check.xml';
 import CheckCircleIcon from '@expo/material-symbols/check_circle.xml';
 import ChevronRightIcon from '@expo/material-symbols/chevron_right.xml';
 import CloseIcon from '@expo/material-symbols/close.xml';
+import CachedIcon from '@expo/material-symbols/cached.xml';
 import CopyIcon from '@expo/material-symbols/content_copy.xml';
+import DatabaseIcon from '@expo/material-symbols/database.xml';
+import DeleteIcon from '@expo/material-symbols/delete.xml';
 import DownloadIcon from '@expo/material-symbols/download.xml';
 import DrawIcon from '@expo/material-symbols/draw.xml';
 import ErrorIcon from '@expo/material-symbols/error.xml';
 import FileOpenIcon from '@expo/material-symbols/file_open.xml';
+import FolderIcon from '@expo/material-symbols/folder.xml';
+import HistoryIcon from '@expo/material-symbols/history.xml';
 import InfoIcon from '@expo/material-symbols/info.xml';
 import ListIcon from '@expo/material-symbols/format_list_bulleted.xml';
 import RefreshIcon from '@expo/material-symbols/refresh.xml';
@@ -22,6 +27,7 @@ import RemoveIcon from '@expo/material-symbols/remove.xml';
 import SearchIcon from '@expo/material-symbols/search.xml';
 import SettingsIcon from '@expo/material-symbols/settings.xml';
 import StickyNoteIcon from '@expo/material-symbols/sticky_note.xml';
+import StorageIcon from '@expo/material-symbols/storage.xml';
 import TextFieldsIcon from '@expo/material-symbols/text_fields.xml';
 
 export const materialSymbolSources = {
@@ -31,11 +37,16 @@ export const materialSymbolSources = {
   chevron: ChevronRightIcon,
   'chevron.left': ArrowBackIcon,
   'chevron.right': ArrowForwardIcon,
+  cached: CachedIcon,
   close: CloseIcon,
   copy: CopyIcon,
+  database: DatabaseIcon,
+  delete: DeleteIcon,
   download: DownloadIcon,
   error: ErrorIcon,
+  folder: FolderIcon,
   highlighter: DrawIcon,
+  history: HistoryIcon,
   info: InfoIcon,
   'list.bullet': ListIcon,
   magnifyingglass: SearchIcon,
@@ -44,6 +55,7 @@ export const materialSymbolSources = {
   refresh: RefreshIcon,
   settings: SettingsIcon,
   note: StickyNoteIcon,
+  storage: StorageIcon,
   'textformat.size': TextFieldsIcon,
   'tray.and.arrow.down': FileOpenIcon,
 } satisfies Record<string, ImageSourcePropType>;
@@ -116,10 +128,20 @@ function iosSymbolName(name: MaterialSymbolName) {
       return 'xmark';
     case 'copy':
       return 'doc.on.doc';
+    case 'cached':
+      return 'arrow.clockwise';
+    case 'database':
+      return 'externaldrive';
+    case 'delete':
+      return 'trash';
     case 'download':
       return 'arrow.down';
     case 'error':
       return 'exclamationmark.triangle';
+    case 'folder':
+      return 'folder';
+    case 'history':
+      return 'clock.arrow.circlepath';
     case 'minus':
       return 'minus';
     case 'refresh':
