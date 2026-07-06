@@ -52,6 +52,7 @@ example
 /ios
 /android
 .idea
+.watchmanconfig
 
 # local build outputs
 *.apk
