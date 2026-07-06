@@ -180,8 +180,8 @@ function fileInDirectory(root: Directory, path: string) {
   return new File(directory, fileName);
 }
 
-async function copyPickedFileToPrivateFile(
-  pickedFile: File,
+async function copyFileToPrivateFile(
+  sourceFile: File,
   originalName: string,
 ) {
   ensureReaderDirectory();
@@ -190,7 +190,7 @@ async function copyPickedFileToPrivateFile(
   tempDir.create({ idempotent: true, intermediates: true });
 
   const tempFile = new File(tempDir, safeFileName(originalName));
-  const bytes = await pickedFile.bytes();
+  const bytes = await sourceFile.bytes();
   tempFile.create({ overwrite: true, intermediates: true });
   tempFile.write(bytes);
 
@@ -319,24 +319,13 @@ function parseTxt(
   };
 }
 
-export async function importBook(db: SQLiteDatabase) {
-  const result = await File.pickFileAsync({
-    mimeTypes: [
-      "application/epub+zip",
-      "text/plain",
-      "text/*",
-      "application/octet-stream",
-    ],
-  });
-
-  if (result.canceled || !result.result) {
-    return null;
-  }
-
-  const pickedFile = result.result;
-  const originalName = pickedFile.name || "book";
+async function importBookFile(
+  db: SQLiteDatabase,
+  sourceFile: File,
+  originalName: string,
+) {
   const extension = originalName.split(".").pop()?.toLowerCase();
-  const mimeType = pickedFile.type.toLowerCase();
+  const mimeType = sourceFile.type.toLowerCase();
   const inferredFormat =
     extension === "epub" || mimeType === "application/epub+zip"
       ? "epub"
@@ -348,8 +337,8 @@ export async function importBook(db: SQLiteDatabase) {
     throw new Error("当前版本仅支持 EPUB 和 TXT 文件。");
   }
 
-  const { tempDir, tempFile, bytes } = await copyPickedFileToPrivateFile(
-    pickedFile,
+  const { tempDir, tempFile, bytes } = await copyFileToPrivateFile(
+    sourceFile,
     originalName,
   );
   const contentHash = hashBytes(bytes);
@@ -399,6 +388,29 @@ export async function importBook(db: SQLiteDatabase) {
   return getBook(db, stored.id);
 }
 
+export async function importBook(db: SQLiteDatabase) {
+  const result = await File.pickFileAsync({
+    mimeTypes: [
+      "application/epub+zip",
+      "text/plain",
+      "text/*",
+      "application/octet-stream",
+    ],
+  });
+
+  if (result.canceled || !result.result) {
+    return null;
+  }
+
+  const pickedFile = result.result;
+  return importBookFile(db, pickedFile, pickedFile.name || "book");
+}
+
+export async function importBookFromUri(db: SQLiteDatabase, uri: string) {
+  const file = new File(uri);
+  return importBookFile(db, file, file.name || fileNameFromUri(uri, "book"));
+}
+
 export async function listBooks(db: SQLiteDatabase) {
   const rows = await db.getAllAsync<BookRow>(
     `SELECT b.*,
@@ -436,11 +448,16 @@ export async function getChapters(db: SQLiteDatabase, bookId: string) {
 }
 
 function fileNameFromUri(uri: string, fallback: string) {
-  const name = uri.split("/").pop();
+  const rawPath = uri.split(/[?#]/)[0];
+  const name = safeDecodeURIComponent(rawPath).split("/").pop();
+  return name || fallback;
+}
+
+function safeDecodeURIComponent(value: string) {
   try {
-    return name ? decodeURIComponent(name) : fallback;
+    return decodeURIComponent(value);
   } catch {
-    return fallback;
+    return value;
   }
 }
 

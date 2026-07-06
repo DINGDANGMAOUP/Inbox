@@ -2,7 +2,7 @@
   "expo": {
     "name": "墨屿",
     "slug": "Inbox",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "inbox",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.dingdangmaoup.inkbox",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#F7F3EA",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -20,6 +20,41 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": true,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            {
+              "scheme": "content",
+              "mimeType": "application/epub+zip"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "application/epub+zip"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "text/plain"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "text/plain"
+            },
+            {
+              "scheme": "content",
+              "mimeType": "text/*"
+            },
+            {
+              "scheme": "file",
+              "mimeType": "text/*"
+            }
+          ]
+        }
+      ],
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
