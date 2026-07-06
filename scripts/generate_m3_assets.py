@@ -81,50 +81,53 @@ def draw_brand_symbol(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int],
     page = hex_to_rgb(paper)
     ink = hex_to_rgb(primary)
     teal = hex_to_rgb(tertiary)
-    draw.rounded_rectangle((x0 + width * 0.16, y0 + height * 0.14, x1 - width * 0.14, y1 - height * 0.12), radius=int(width * 0.14), fill=page)
-    draw.rounded_rectangle((x0 + width * 0.22, y0 + height * 0.20, x1 - width * 0.20, y1 - height * 0.18), radius=int(width * 0.10), outline=ink, width=max(4, int(width * 0.035)))
+    stroke = max(5, int(width * 0.048))
+    draw.rounded_rectangle((x0 + width * 0.15, y0 + height * 0.13, x1 - width * 0.12, y1 - height * 0.12), radius=int(width * 0.17), fill=page)
+    draw.rounded_rectangle((x0 + width * 0.20, y0 + height * 0.19, x1 - width * 0.17, y1 - height * 0.17), radius=int(width * 0.12), outline=ink, width=stroke)
     draw.polygon(
         [
-            (x0 + width * 0.62, y0 + height * 0.22),
-            (x0 + width * 0.78, y0 + height * 0.22),
-            (x0 + width * 0.78, y0 + height * 0.58),
-            (x0 + width * 0.70, y0 + height * 0.50),
-            (x0 + width * 0.62, y0 + height * 0.58),
+            (x0 + width * 0.62, y0 + height * 0.17),
+            (x0 + width * 0.80, y0 + height * 0.17),
+            (x0 + width * 0.80, y0 + height * 0.56),
+            (x0 + width * 0.71, y0 + height * 0.46),
+            (x0 + width * 0.62, y0 + height * 0.56),
         ],
         fill=teal,
     )
-    for index, ratio in enumerate((0.34, 0.47, 0.60)):
+    for index, ratio in enumerate((0.35, 0.50)):
         y = y0 + height * ratio
-        draw.rounded_rectangle((x0 + width * 0.30, y, x0 + width * (0.60 + index * 0.04), y + height * 0.035), radius=int(width * 0.02), fill=ink)
-    draw.arc((x0 + width * 0.26, y0 + height * 0.56, x0 + width * 0.82, y0 + height * 0.98), 198, 345, fill=ink, width=max(5, int(width * 0.045)))
-    draw.arc((x0 + width * 0.32, y0 + height * 0.62, x0 + width * 0.78, y0 + height * 0.94), 198, 342, fill=teal, width=max(3, int(width * 0.026)))
+        draw.rounded_rectangle((x0 + width * 0.29, y, x0 + width * (0.57 + index * 0.06), y + height * 0.040), radius=int(width * 0.025), fill=ink)
+    draw.arc((x0 + width * 0.24, y0 + height * 0.52, x0 + width * 0.87, y0 + height * 0.98), 200, 346, fill=ink, width=max(7, int(width * 0.070)))
+    draw.arc((x0 + width * 0.32, y0 + height * 0.61, x0 + width * 0.82, y0 + height * 0.94), 201, 344, fill=teal, width=max(4, int(width * 0.032)))
 
 
 def icon_canvas(size: int, palette: dict[str, str], transparent_bg: bool = False, monochrome: bool = False) -> Image.Image:
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0) if transparent_bg else hex_to_rgb(palette["background"]) + (255,))
     draw = ImageDraw.Draw(image)
     if not transparent_bg:
-        image = add_texture(image, 10)
+        image = add_texture(image, 8)
         draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((size * 0.10, size * 0.12, size * 0.90, size * 0.88), radius=int(size * 0.25), fill=hex_to_rgb(palette["container"]) + (235,))
-        draw.rounded_rectangle((size * 0.21, size * 0.16, size * 0.82, size * 0.72), radius=int(size * 0.19), fill=hex_to_rgb(palette["surface"]) + (245,))
+        draw.rounded_rectangle((size * 0.16, size * 0.16, size * 0.84, size * 0.84), radius=int(size * 0.22), fill=hex_to_rgb(palette["surface"]) + (255,))
+        draw.rounded_rectangle((size * 0.21, size * 0.24, size * 0.79, size * 0.80), radius=int(size * 0.18), outline=hex_to_rgb(palette["container"]) + (255,), width=max(8, int(size * 0.030)))
     else:
-        draw.rounded_rectangle((size * 0.18, size * 0.18, size * 0.82, size * 0.82), radius=int(size * 0.21), fill=hex_to_rgb(palette["container"]) + (255,))
+        draw.rounded_rectangle((size * 0.17, size * 0.17, size * 0.83, size * 0.83), radius=int(size * 0.22), fill=hex_to_rgb(palette["surface" if not monochrome else "container"]) + (255,))
+        if not monochrome:
+            draw.rounded_rectangle((size * 0.22, size * 0.25, size * 0.78, size * 0.79), radius=int(size * 0.17), outline=hex_to_rgb(palette["container"]) + (255,), width=max(8, int(size * 0.030)))
 
     if monochrome:
-        draw_brand_symbol(draw, (int(size * 0.23), int(size * 0.23), int(size * 0.77), int(size * 0.77)), "#FFFFFF", "#FFFFFF", "#FFFFFF")
+        draw_brand_symbol(draw, (int(size * 0.24), int(size * 0.24), int(size * 0.76), int(size * 0.76)), "#FFFFFF", "#FFFFFF", "#FFFFFF")
     else:
-        draw_brand_symbol(draw, (int(size * 0.23), int(size * 0.22), int(size * 0.78), int(size * 0.78)), palette["primary"], palette["surface"], palette["tertiary"])
+        draw_brand_symbol(draw, (int(size * 0.25), int(size * 0.24), int(size * 0.77), int(size * 0.77)), palette["primary"], palette["surface"], palette["tertiary"])
     return image
 
 
 def save_icon_assets() -> None:
     palette = {
-        "background": "#F7F3EA",
+        "background": "#10130E",
         "surface": "#FBF8F2",
-        "container": "#E7D9B7",
+        "container": "#D7E9D7",
         "primary": "#151611",
-        "tertiary": "#3F6751",
+        "tertiary": "#2F6B4F",
     }
     icon = icon_canvas(1024, palette)
     icon.save(ASSETS / "icon.png")
@@ -141,28 +144,29 @@ def draw_wordmark(filename: str = "moyu-wordmark.png", dark: bool = False) -> No
     draw = ImageDraw.Draw(image)
     title = "#F7F0E4" if dark else "#151611"
     meta = "#CFC2A5" if dark else "#756D60"
-    chip = "#E7D9B7" if dark else "#151611"
+    chip = "#D7E9D7" if dark else "#151611"
     chip_text = "#171811" if dark else "#F7F0E4"
-    draw_brand_symbol(draw, (60, 78, 360, 378), "#E7D9B7" if dark else "#151611", "#171811" if dark else "#FBF8F2", "#BFD6C3" if dark else "#3F6751")
-    draw.text((420, 88), "墨屿", fill=title, font=font(150))
-    draw.text((430, 258), "INBOX", fill=meta, font=font(58))
-    draw.rounded_rectangle((420, 350, 870, 420), radius=35, fill=chip)
-    draw.text((492, 361), "本机阅读", fill=chip_text, font=font(34))
+    draw_brand_symbol(draw, (64, 82, 354, 372), "#E7D9B7" if dark else "#151611", "#171811" if dark else "#FBF8F2", "#BFD6C3" if dark else "#2F6B4F")
+    draw.text((420, 86), "墨屿", fill=title, font=font(148))
+    draw.text((430, 258), "INBOX READER", fill=meta, font=font(52))
+    draw.rounded_rectangle((420, 348, 842, 416), radius=34, fill=chip)
+    draw.text((492, 359), "离线阅读", fill=chip_text, font=font(34))
     image.save(ASSETS / "brand" / filename)
 
 
 def draw_logo_board() -> None:
-    image = vertical_gradient((1200, 720), ["#F7F3EA", "#EFE9DF", "#E7D9B7"])
-    image = add_texture(image, 12)
-    shadow = rounded_shadow((1200, 720), 82, (29, 27, 32, 42))
+    image = vertical_gradient((1200, 720), ["#10130E", "#182018", "#D7E9D7"])
+    image = add_texture(image, 10)
+    shadow = rounded_shadow((1200, 720), 76, (8, 10, 7, 64))
     card = Image.new("RGBA", (1200, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(card)
-    draw.rounded_rectangle((86, 86, 1114, 634), radius=86, fill=(251, 248, 242, 238), outline=(80, 73, 62, 42), width=3)
-    draw_brand_symbol(draw, (154, 160, 430, 436), "#151611", "#FBF8F2", "#3F6751")
-    draw.text((490, 176), "墨屿", fill="#151611", font=font(124))
-    draw.text((502, 328), "Inbox", fill="#756D60", font=font(52))
-    draw.rounded_rectangle((492, 430, 872, 508), radius=39, fill="#E7D9B7")
-    draw.text((548, 446), "离线阅读", fill="#171811", font=font(40))
+    draw.rounded_rectangle((94, 92, 1106, 628), radius=78, fill=(251, 248, 242, 244), outline=(215, 233, 215, 120), width=4)
+    draw.rounded_rectangle((154, 156, 432, 434), radius=72, fill=(16, 19, 14, 255))
+    draw_brand_symbol(draw, (184, 184, 402, 404), "#151611", "#FBF8F2", "#2F6B4F")
+    draw.text((492, 166), "墨屿", fill="#151611", font=font(124))
+    draw.text((504, 318), "Inbox Reader", fill="#53635A", font=font(50))
+    draw.rounded_rectangle((494, 424, 864, 500), radius=38, fill="#D7E9D7")
+    draw.text((550, 440), "离线阅读", fill="#102016", font=font(40))
     image = Image.alpha_composite(image, shadow)
     image = Image.alpha_composite(image, card)
     image.save(ASSETS / "brand" / "moyu-logo-board.png")
