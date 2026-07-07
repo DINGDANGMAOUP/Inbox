@@ -2,7 +2,7 @@
   "expo": {
     "name": "墨屿",
     "slug": "Inbox",
-    "version": "0.0.5",
+    "version": "0.0.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "inbox",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.dingdangmaoup.inkbox",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "backgroundColor": "#F7F3EA",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -78,9 +78,9 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#F7F3EA",
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/android-icon-foreground.png",
           "android": {
-            "image": "./assets/images/splash-icon.png",
+            "image": "./assets/images/android-icon-foreground.png",
             "imageWidth": 76
           }
         }

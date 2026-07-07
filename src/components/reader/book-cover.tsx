@@ -65,8 +65,8 @@ export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
         <Text style={[styles.format, compact && styles.smallFormat]}>{book.format.toUpperCase()}</Text>
       </View>
       {!compact && (
-        <View style={[styles.islandMark, { backgroundColor: coverTheme === 'deep' ? brand.chrome.text : themeToken.surfaceSolid }]}>
-          <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.islandMarkImage} />
+        <View style={[styles.islandMark, { backgroundColor: brand.colors.paper }]}>
+          <Image source={brandAssets.logoMark} contentFit="contain" transition={160} style={styles.islandMarkImage} />
         </View>
       )}
       {!compact && (
@@ -192,7 +192,6 @@ const styles = StyleSheet.create({
   islandMarkImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 11,
   },
   brandText: {
     fontSize: 9,

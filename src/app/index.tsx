@@ -43,7 +43,7 @@ const libraryFilters: { value: LibraryFilter; label: string; icon: MaterialSymbo
 function BrandSeal() {
   return (
     <View style={styles.brandSeal}>
-      <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.brandSealImage} />
+      <Image source={brandAssets.logoMark} contentFit="contain" transition={160} style={styles.brandSealImage} />
     </View>
   );
 }
@@ -97,8 +97,8 @@ function FeaturedBookCover({ book, theme }: { book: LibraryBook; theme: Resolved
       <View style={styles.featuredBookFormat}>
         <Text style={styles.featuredBookFormatText}>{book.format.toUpperCase()}</Text>
       </View>
-      <View style={[styles.featuredBookMark, { backgroundColor: isDeep ? brand.chrome.text : token.surfaceSolid }]}>
-        <Image source={brandAssets.logoMark} contentFit="cover" transition={160} style={styles.featuredBookMarkImage} />
+      <View style={[styles.featuredBookMark, { backgroundColor: brand.colors.paper }]}>
+        <Image source={brandAssets.logoMark} contentFit="contain" transition={160} style={styles.featuredBookMarkImage} />
       </View>
       <View style={styles.featuredBookCoverCopy}>
         <Text numberOfLines={1} style={[styles.featuredBookBrand, { color: mutedColor }]}>
@@ -594,11 +594,8 @@ const styles = StyleSheet.create({
     backgroundColor: brand.colors.paper,
   },
   brandSealImage: {
-    position: 'absolute',
-    left: -31,
-    top: -30,
-    width: 96,
-    height: 96,
+    width: '100%',
+    height: '100%',
   },
   heroText: {
     flex: 1,
@@ -753,7 +750,6 @@ const styles = StyleSheet.create({
   featuredBookMarkImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 10,
   },
   featuredBookCoverCopy: {
     position: 'absolute',

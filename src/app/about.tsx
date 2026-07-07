@@ -251,14 +251,14 @@ export default function AboutScreen() {
               style={[
                 styles.logoPlate,
                 {
-                  backgroundColor: theme.surfaceSolid,
+                  backgroundColor: brand.colors.paper,
                   borderColor: theme.line,
                 },
               ]}
             >
               <Image
                 source={brandAssets.logoMark}
-                contentFit="cover"
+                contentFit="contain"
                 style={styles.logo}
               />
             </View>
@@ -561,11 +561,8 @@ const styles = StyleSheet.create({
     boxShadow: "0 12px 26px rgba(18, 20, 15, 0.10)",
   },
   logo: {
-    position: "absolute",
-    left: -77,
-    top: -76,
-    width: 238,
-    height: 238,
+    width: "100%",
+    height: "100%",
   },
   appName: {
     marginTop: 30,
