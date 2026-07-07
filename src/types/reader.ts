@@ -8,6 +8,8 @@ export type ResolvedAppTheme = 'mist' | 'deep';
 
 export type ReaderTheme = 'paper' | 'sepia' | 'night' | 'eink';
 
+export type ReaderFontFamily = 'system' | 'serif' | 'sans' | 'kai';
+
 export type ReadingMode = 'scroll' | 'page';
 
 export type Book = {
@@ -56,6 +58,7 @@ export type Annotation = {
 export type ReaderPreferences = {
   appThemeMode: AppThemeMode;
   readerTheme: ReaderTheme;
+  fontFamily: ReaderFontFamily;
   fontSize: number;
   lineHeight: number;
   margin: number;

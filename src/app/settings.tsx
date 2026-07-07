@@ -8,9 +8,10 @@ import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
 import { brand } from '@/constants/brand';
+import { readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
-import type { ReaderPreferences, ReaderTheme, ResolvedAppTheme } from '@/types/reader';
+import type { ReaderFontFamily, ReaderPreferences, ReaderTheme, ResolvedAppTheme } from '@/types/reader';
 
 const readingModeCopy: Record<ReaderPreferences['readingMode'], { title: string; body: string }> = {
   scroll: { title: '滚动', body: '' },
@@ -118,7 +119,7 @@ export default function SettingsScreen() {
             <>
               <View style={[styles.intro, { borderBottomColor: theme.line }]}>
                 <Text style={[styles.screenMeta, { color: theme.muted }]}>
-                  {readerThemeCopy[preferences.readerTheme].title} · {readingModeCopy[preferences.readingMode].title}
+                  {readerThemeCopy[preferences.readerTheme].title} · {readerFontFamilies[preferences.fontFamily].label} · {readingModeCopy[preferences.readingMode].title}
                 </Text>
                 <Text accessibilityLiveRegion="polite" style={[styles.saveStatus, { color: saving ? theme.accent : theme.muted }]}>
                   {saving ? '保存中' : '已保存'}
@@ -142,6 +143,14 @@ export default function SettingsScreen() {
                     />
                   );
                 })}
+              </SettingGroup>
+
+              <SettingGroup theme={theme} title="字体" value={readerFontFamilies[preferences.fontFamily].label}>
+                <FontSelector
+                  theme={theme}
+                  value={preferences.fontFamily}
+                  onChange={(fontFamily) => updatePreference({ ...preferences, fontFamily })}
+                />
               </SettingGroup>
 
               <SettingGroup theme={theme} title="阅读方式" value={readingModeCopy[preferences.readingMode].title}>
@@ -240,6 +249,48 @@ function PreferenceChoice({
   );
 }
 
+function FontSelector({
+  theme,
+  value,
+  onChange,
+}: {
+  theme: SettingsTheme;
+  value: ReaderFontFamily;
+  onChange: (value: ReaderFontFamily) => void;
+}) {
+  return (
+    <View style={styles.fontSelector}>
+      {readerFontFamilyOrder.map((fontFamily) => {
+        const selected = value === fontFamily;
+        const copy = readerFontFamilies[fontFamily];
+        const foreground = selected ? theme.onPrimaryContainer : theme.text;
+        return (
+          <M3Pressable
+            key={fontFamily}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            feedback={selected ? 'subtle' : 'standard'}
+            onPress={() => onChange(fontFamily)}
+            style={[
+              styles.fontOption,
+              {
+                backgroundColor: selected ? theme.primaryContainer : theme.surfaceContainer,
+                borderColor: selected ? theme.accent : theme.line,
+              },
+            ]}>
+            <Text numberOfLines={1} style={[styles.fontOptionSample, { color: foreground, fontFamily: readerNativeFontFamily(fontFamily) }]}>
+              {copy.sample}
+            </Text>
+            <Text numberOfLines={1} style={[styles.fontOptionLabel, { color: selected ? theme.onPrimaryContainer : theme.muted }]}>
+              {copy.label}
+            </Text>
+          </M3Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function ModeSelector({
   theme,
   value,
@@ -319,7 +370,9 @@ function ReadingPreview({ preferences }: { preferences: ReaderPreferences }) {
     <View style={[styles.readerPreview, { backgroundColor: token.surfaceSolid, borderColor: token.line }]}>
       <View style={styles.readerPreviewMeta}>
         <Text style={[styles.readerPreviewKicker, { color: token.accent }]}>预览</Text>
-        <Text style={[styles.readerPreviewMode, { color: token.muted }]}>{readingModeCopy[preferences.readingMode].title}</Text>
+        <Text style={[styles.readerPreviewMode, { color: token.muted }]}>
+          {readerFontFamilies[preferences.fontFamily].label} · {readingModeCopy[preferences.readingMode].title}
+        </Text>
       </View>
       <Text
         numberOfLines={4}
@@ -329,6 +382,7 @@ function ReadingPreview({ preferences }: { preferences: ReaderPreferences }) {
             color: token.text,
             fontSize: previewFontSize,
             lineHeight: previewLineHeight,
+            fontFamily: readerNativeFontFamily(preferences.fontFamily),
             paddingHorizontal: Math.max(6, Math.min(18, preferences.margin / 2)),
           },
         ]}>
@@ -534,6 +588,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 19,
     fontWeight: '800',
+    letterSpacing: 0,
+  },
+  fontSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingVertical: 10,
+  },
+  fontOption: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    minHeight: 62,
+    borderRadius: 16,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
+    gap: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  fontOptionSample: {
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  fontOptionLabel: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '900',
     letterSpacing: 0,
   },
   readerPreview: {

@@ -41,6 +41,9 @@ const resourcePaths = new Set((parsed.resources ?? []).map((resource) => resourc
 if (!html.includes(EPUB_LAYOUT_MARKER)) {
   throw new Error('EPUB layout marker missing');
 }
+if (!html.includes('--reader-font-family') || !html.includes('font-family: var(--reader-font-family')) {
+  throw new Error('EPUB reader font hook missing');
+}
 if (!html.includes('href="../Styles/book.css"') || !html.includes('class="book-layout"') || !html.includes('class="lead"')) {
   throw new Error('EPUB HTML layout was not preserved');
 }

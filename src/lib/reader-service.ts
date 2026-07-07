@@ -21,6 +21,7 @@ import type {
   Chapter,
   LibraryBook,
   ReaderPreferences,
+  ReaderFontFamily,
   ReaderTheme,
   SearchResult,
 } from "@/types/reader";
@@ -109,6 +110,18 @@ function normalizeReadingMode(
   mode?: string | null,
 ): ReaderPreferences["readingMode"] {
   return mode === "page" ? "page" : "scroll";
+}
+
+function normalizeReaderFontFamily(fontFamily?: string | null): ReaderFontFamily {
+  if (
+    fontFamily === "system" ||
+    fontFamily === "serif" ||
+    fontFamily === "sans" ||
+    fontFamily === "kai"
+  ) {
+    return fontFamily;
+  }
+  return "system";
 }
 
 function mapBook(row: BookRow): Book {
@@ -669,18 +682,20 @@ export async function getReaderPreferences(
     theme: string;
     app_theme_mode: string | null;
     reader_theme: string | null;
+    font_family: string | null;
     font_size: number;
     line_height: number;
     margin: number;
     reading_mode: string | null;
   }>(
-    "SELECT theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?",
+    "SELECT theme, app_theme_mode, reader_theme, font_family, font_size, line_height, margin, reading_mode FROM reader_preferences WHERE id = ?",
     "default",
   );
 
   return {
     appThemeMode: normalizeAppThemeMode(row?.app_theme_mode ?? row?.theme),
     readerTheme: normalizeReaderTheme(row?.reader_theme ?? row?.theme),
+    fontFamily: normalizeReaderFontFamily(row?.font_family),
     fontSize: row?.font_size ?? 19,
     lineHeight: row?.line_height ?? 1.7,
     margin: row?.margin ?? 22,
@@ -693,12 +708,13 @@ export async function updateReaderPreferences(
   preferences: ReaderPreferences,
 ) {
   await db.runAsync(
-    `INSERT INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode)
-     VALUES ('default', ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_family, font_size, line_height, margin, reading_mode)
+     VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        theme = excluded.theme,
        app_theme_mode = excluded.app_theme_mode,
        reader_theme = excluded.reader_theme,
+       font_family = excluded.font_family,
        font_size = excluded.font_size,
        line_height = excluded.line_height,
        margin = excluded.margin,
@@ -706,6 +722,7 @@ export async function updateReaderPreferences(
     preferences.appThemeMode === "deep" ? "deep" : "mist",
     preferences.appThemeMode,
     preferences.readerTheme,
+    preferences.fontFamily,
     preferences.fontSize,
     preferences.lineHeight,
     preferences.margin,

@@ -9,6 +9,7 @@ import type { AppThemeMode, ReaderPreferences, ResolvedAppTheme } from '@/types/
 export const defaultReaderPreferences: ReaderPreferences = {
   appThemeMode: 'system',
   readerTheme: 'paper',
+  fontFamily: 'system',
   fontSize: 19,
   lineHeight: 1.7,
   margin: 22,

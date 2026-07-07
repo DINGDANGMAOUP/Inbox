@@ -119,6 +119,7 @@ function readerHeadAdditions() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <style>
     :root {
+      --reader-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
       --reader-font-size: 19px;
       --reader-line-height: 1.7;
     }
@@ -129,9 +130,13 @@ function readerHeadAdditions() {
     body {
       background: var(--reader-bg, transparent);
       color: var(--reader-text, inherit);
+      font-family: var(--reader-font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif);
       font-size: var(--reader-font-size, 19px);
       line-height: var(--reader-line-height, 1.7);
       text-rendering: optimizeLegibility;
+    }
+    p, div, span, li, blockquote, pre, figcaption, th, td {
+      font-family: var(--reader-font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif);
     }
     :where(p) {
       margin: 0;

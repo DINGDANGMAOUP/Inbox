@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 
 export async function migrateReaderDb(db: SQLiteDatabase) {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
@@ -78,6 +78,7 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
       theme TEXT NOT NULL,
       app_theme_mode TEXT NOT NULL DEFAULT 'system',
       reader_theme TEXT NOT NULL DEFAULT 'paper',
+      font_family TEXT NOT NULL DEFAULT 'system',
       font_size INTEGER NOT NULL,
       line_height REAL NOT NULL,
       margin INTEGER NOT NULL,
@@ -131,10 +132,13 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
          END;
     `);
   }
+  if (!preferenceColumns.some((column) => column.name === 'font_family')) {
+    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN font_family TEXT NOT NULL DEFAULT 'system';`);
+  }
 
   await db.runAsync(
-    `INSERT OR IGNORE INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_size, line_height, margin, reading_mode)
-     VALUES ('default', 'mist', 'system', 'paper', 19, 1.7, 22, 'scroll')`
+    `INSERT OR IGNORE INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_family, font_size, line_height, margin, reading_mode)
+     VALUES ('default', 'mist', 'system', 'paper', 'system', 19, 1.7, 22, 'scroll')`
   );
 
   await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);

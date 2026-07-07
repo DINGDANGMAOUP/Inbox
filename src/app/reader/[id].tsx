@@ -27,6 +27,7 @@ import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brand } from '@/constants/brand';
+import { readerFontCssStack, readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
 import { readerThemeAssets } from '@/constants/theme-assets';
 import {
   createAnnotation,
@@ -201,6 +202,7 @@ function renderTextBlock(block: string) {
 
 function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, readerInsets: ReaderInsets, restoreRatio: number, chapterIndex: number, chapterCount: number) {
   const theme = brand.readerThemes[preferences.readerTheme];
+  const fontStack = readerFontCssStack(preferences.fontFamily);
   const initialInsets = {
     top: Math.max(32, Math.round(readerInsets.top)),
     bottom: Math.max(48, Math.round(readerInsets.bottom)),
@@ -274,7 +276,7 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, rea
       padding: ${initialInsets.top}px ${preferences.margin}px ${initialInsets.bottom}px;
       background: var(--reader-bg, ${theme.background});
       color: var(--reader-text, ${theme.text});
-      font-family: "Songti SC", "Noto Serif CJK SC", "Noto Serif", Georgia, serif;
+      font-family: var(--reader-font-family, ${fontStack});
       font-size: var(--reader-font-size, ${preferences.fontSize}px);
       line-height: var(--reader-line-height, ${preferences.lineHeight});
       letter-spacing: 0;
@@ -458,6 +460,7 @@ function preferenceScript(
   preserveLayout: boolean
 ) {
   const theme = brand.readerThemes[preferences.readerTheme];
+  const fontStack = readerFontCssStack(preferences.fontFamily);
   const initialInsets = {
     top: Math.max(32, Math.round(readerInsets.top)),
     bottom: Math.max(48, Math.round(readerInsets.bottom)),
@@ -552,6 +555,7 @@ function preferenceScript(
         var safeInsets = normalizedInsets();
         document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
         document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
+        document.documentElement.style.setProperty("--reader-font-family", ${JSON.stringify(fontStack)});
         document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
         document.documentElement.style.setProperty("--reader-text", "${theme.text}");
         document.documentElement.style.background = "${theme.background}";
@@ -1146,6 +1150,7 @@ function preferenceScript(
 
 function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio: number, readerInsets: ReaderInsets, preserveLayout: boolean) {
   const theme = brand.readerThemes[preferences.readerTheme];
+  const fontStack = readerFontCssStack(preferences.fontFamily);
   const initialInsets = {
     top: Math.max(32, Math.round(readerInsets.top)),
     bottom: Math.max(48, Math.round(readerInsets.bottom)),
@@ -1189,6 +1194,7 @@ function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio:
         document.documentElement.style.background = "${theme.background}";
         document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
         document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
+        document.documentElement.style.setProperty("--reader-font-family", ${JSON.stringify(fontStack)});
         document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
         document.documentElement.style.setProperty("--reader-text", "${theme.text}");
         if (!document.body) {
@@ -1348,6 +1354,7 @@ export default function ReaderScreen() {
   const [preferences, setPreferences] = useState<ReaderPreferences>({
     appThemeMode: 'system',
     readerTheme: 'paper',
+    fontFamily: 'system',
     fontSize: 19,
     lineHeight: 1.7,
     margin: 22,
@@ -1943,7 +1950,7 @@ export default function ReaderScreen() {
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
           <WebView
-            key={`${preferences.readerTheme}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
+            key={`${preferences.readerTheme}-${preferences.fontFamily}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
             ref={webViewRef}
             originWhitelist={['*']}
             source={readerSource}
@@ -2316,6 +2323,45 @@ export default function ReaderScreen() {
                       </Text>
                     </M3Pressable>
                   ))}
+                </View>
+                <View style={styles.fontRow}>
+                  {readerFontFamilyOrder.map((fontFamily) => {
+                    const active = preferences.fontFamily === fontFamily;
+                    const foreground = active ? chromeTheme.accentText : chromeTheme.text;
+                    return (
+                      <M3Pressable
+                        key={fontFamily}
+                        captureTouches
+                        onPress={() => updatePreference({ ...preferences, fontFamily })}
+                        feedback={active ? 'subtle' : 'standard'}
+                        accessibilityRole="button"
+                        accessibilityLabel={`字体 ${readerFontFamilies[fontFamily].label}`}
+                        accessibilityState={{ selected: active }}
+                        style={[
+                          styles.fontChip,
+                          {
+                            backgroundColor: active ? chromeTheme.accent : chromeTheme.subtleSurface,
+                            borderColor: active ? chromeTheme.accent : chromeTheme.controlBorder,
+                          },
+                        ]}>
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.fontChipSample,
+                            {
+                              color: foreground,
+                              fontFamily: readerNativeFontFamily(fontFamily),
+                              fontWeight: '700',
+                            },
+                          ]}>
+                          {readerFontFamilies[fontFamily].sample}
+                        </Text>
+                        <Text numberOfLines={1} style={[styles.fontChipLabel, { color: foreground }]}>
+                          {readerFontFamilies[fontFamily].label}
+                        </Text>
+                      </M3Pressable>
+                    );
+                  })}
                 </View>
                 <M3Stepper
                   theme={panelControlTheme}
@@ -2856,6 +2902,32 @@ const styles = StyleSheet.create({
   themeRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  fontRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fontChip: {
+    flex: 1,
+    minHeight: 54,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+  },
+  fontChipSample: {
+    fontSize: 16,
+    lineHeight: 21,
+    letterSpacing: 0,
+  },
+  fontChipLabel: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
   },
   themeChip: {
     flex: 1,
