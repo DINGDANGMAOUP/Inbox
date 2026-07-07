@@ -110,6 +110,40 @@ function cleanInlineContent(input: string) {
     .trim();
 }
 
+function chapterTitleKey(input: string) {
+  const cleaned = cleanChapterTitle(input, '');
+  if (!cleaned) {
+    return '';
+  }
+
+  return chapterLabel(cleaned)
+    .normalize('NFKC')
+    .replace(/[\s　:：,，.。·\-—_]+/g, '')
+    .toLowerCase();
+}
+
+function shouldShowChapterHeading(title: string, chapterCount: number) {
+  const label = chapterLabel(title);
+  return chapterCount > 1 || !/^(?:正文|未命名文本)$/.test(label);
+}
+
+function isDuplicateChapterHeading(block: string, title: string) {
+  const blockKey = chapterTitleKey(cleanInlineContent(block));
+  const titleKey = chapterTitleKey(title);
+  return Boolean(blockKey && titleKey && blockKey === titleKey);
+}
+
+function renderChapterHeading(chapter: Chapter, chapterIndex: number, chapterCount: number) {
+  const title = chapterLabel(chapter.title);
+  const kicker = chapterCount > 1 ? `第 ${chapterIndex + 1} / ${chapterCount} 章` : '正文';
+
+  return `<header class="chapter-heading">
+    <div class="chapter-heading-kicker">${escapeHtml(kicker)}</div>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="chapter-heading-rule" aria-hidden="true"></div>
+  </header>`;
+}
+
 function parseAnnotationPosition(position: string) {
   try {
     const parsed = JSON.parse(position) as { chapterId?: string; offset?: number; quote?: string };
@@ -165,7 +199,7 @@ function renderTextBlock(block: string) {
   return `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`;
 }
 
-function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, readerInsets: ReaderInsets, restoreRatio: number) {
+function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, readerInsets: ReaderInsets, restoreRatio: number, chapterIndex: number, chapterCount: number) {
   const theme = brand.readerThemes[preferences.readerTheme];
   const initialInsets = {
     top: Math.max(32, Math.round(readerInsets.top)),
@@ -180,19 +214,49 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, rea
       overflow-y: hidden;
     }
     body {
+      width: 100vw;
+      max-width: none;
       min-height: 100vh;
       height: 100vh;
+      margin-left: 0;
+      margin-right: 0;
+      padding-left: 0;
+      padding-right: 0;
       overflow: visible;
-      column-width: max(220px, calc(100vw - ${preferences.margin * 2}px));
-      column-gap: ${preferences.margin * 2}px;
-      -webkit-column-width: max(220px, calc(100vw - ${preferences.margin * 2}px));
-      -webkit-column-gap: ${preferences.margin * 2}px;
+      column-width: 100vw;
+      column-gap: 0;
+      column-fill: auto;
+      -webkit-column-width: 100vw;
+      -webkit-column-gap: 0;
+      -webkit-column-fill: auto;
+    }
+    .chapter-heading,
+    .book-content {
+      box-sizing: border-box;
+      padding-left: ${preferences.margin}px;
+      padding-right: ${preferences.margin}px;
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
     }`
       : '';
-  const paragraphs = chapter.textContent
+  const showChapterHeading = shouldShowChapterHeading(chapter.title, chapterCount);
+  const textBlocks = chapter.textContent
     .replace(/\\r/g, '\n')
     .replace(/\r/g, '\n')
-    .split(/\n{1,}/)
+    .split(/\n{1,}/);
+  let checkedOpeningBlock = false;
+  const paragraphs = textBlocks
+    .filter((block) => {
+      if (!showChapterHeading || checkedOpeningBlock) {
+        return true;
+      }
+      if (!cleanInlineContent(block)) {
+        return true;
+      }
+
+      checkedOpeningBlock = true;
+      return !isDuplicateChapterHeading(block, chapter.title);
+    })
     .map(renderTextBlock)
     .filter(Boolean)
     .join('\n');
@@ -214,7 +278,13 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, rea
       font-size: var(--reader-font-size, ${preferences.fontSize}px);
       line-height: var(--reader-line-height, ${preferences.lineHeight});
       letter-spacing: 0;
+      text-align: justify;
+      text-justify: inter-character;
       text-rendering: optimizeLegibility;
+      line-break: strict;
+      word-break: normal;
+      overflow-wrap: break-word;
+      hanging-punctuation: allow-end;
       box-sizing: border-box;
       max-width: 720px;
       margin-left: auto;
@@ -224,18 +294,60 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, rea
       -webkit-touch-callout: none;
     }
     ${pageModeCss}
-    p { margin: 0 0 1.12em; }
-    h2 {
-      margin: 1.25em 0 0.75em;
-      font-size: 1.28em;
-      line-height: 1.28;
+    .chapter-heading {
+      padding: 4.8em 0 3em;
+      text-align: center;
+      break-after: avoid;
+      page-break-after: avoid;
     }
-    .section-path {
-      margin: 1.4em 0 0.65em;
+    .chapter-heading-kicker {
+      margin-bottom: 1.4em;
+      color: var(--reader-muted, ${theme.muted});
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.68em;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      line-height: 1.2;
+    }
+    .chapter-heading h1 {
+      max-width: 18em;
+      margin: 0 auto;
+      font-size: 1.74em;
+      font-weight: 600;
+      line-height: 1.28;
+      letter-spacing: 0.05em;
+      text-align: center;
+      text-indent: 0;
+      text-wrap: balance;
+    }
+    .chapter-heading-rule {
+      width: 3.2em;
+      height: 1px;
+      margin: 1.6em auto 0;
+      background: currentColor;
+      opacity: 0.28;
+    }
+    .book-content p {
+      margin: 0;
+      text-indent: 2em;
+    }
+    .book-content h2 {
+      margin: 2.4em 0 1.1em;
+      font-size: 1.2em;
+      font-weight: 600;
+      line-height: 1.28;
+      text-align: center;
+      text-indent: 0;
+      text-wrap: balance;
+    }
+    .book-content .section-path {
+      margin: 2em 0 1em;
       color: var(--reader-muted, ${theme.muted});
       font-size: 0.82em;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-weight: 700;
+      text-align: center;
+      text-indent: 0;
     }
     .inbox-custom-selection {
       background: rgba(167, 121, 78, 0.28);
@@ -266,7 +378,10 @@ function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, rea
   </style>
 </head>
 <body>
-  ${paragraphs}
+  ${showChapterHeading ? renderChapterHeading(chapter, chapterIndex, chapterCount) : ''}
+  <main id="book-content" class="book-content">
+    ${paragraphs}
+  </main>
   ${initialReaderPositionScript(preferences, restoreRatio)}
   ${readerScript()}
 </body>
@@ -303,15 +418,19 @@ function escapeHtml(input: string) {
 
 function readerScript() {
   return `<script>
+    function readerTextRoot() {
+      return document.getElementById("book-content") || document.body;
+    }
     window.__INBOX_CAPTURE_SELECTION = function() {
       var selection = window.getSelection();
       var selectedText = selection ? selection.toString().trim() : "";
       var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
       var rect = range && range.getBoundingClientRect ? range.getBoundingClientRect() : null;
+      var textRoot = readerTextRoot();
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: selectedText ? "selection-menu" : "selection-empty",
         selectedText: selectedText,
-        offset: selectedText ? document.body.innerText.indexOf(selectedText) : -1,
+        offset: selectedText ? textRoot.innerText.indexOf(selectedText) : -1,
         x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
         y: rect ? rect.bottom : 96
       }));
@@ -406,6 +525,29 @@ function preferenceScript(
         };
       }
 
+      function syncPreservedPageMargins(active) {
+        var id = "inbox-preserved-page-margins";
+        var existing = document.getElementById(id);
+        if (!active) {
+          document.documentElement.classList.remove("inbox-reader-page");
+          if (existing) existing.remove();
+          return;
+        }
+
+        document.documentElement.classList.add("inbox-reader-page");
+        var style = existing || document.createElement("style");
+        style.id = id;
+        style.textContent =
+          "html.inbox-reader-page body > :not(script):not(style) {" +
+          "box-sizing: border-box;" +
+          "padding-left: " + margin + "px;" +
+          "padding-right: " + margin + "px;" +
+          "-webkit-box-decoration-break: clone;" +
+          "box-decoration-break: clone;" +
+          "}";
+        if (!existing && document.head) document.head.appendChild(style);
+      }
+
       function applyMode() {
         var safeInsets = normalizedInsets();
         document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
@@ -414,19 +556,28 @@ function preferenceScript(
         document.documentElement.style.setProperty("--reader-text", "${theme.text}");
         document.documentElement.style.background = "${theme.background}";
         disableNativeSelection();
+        syncPreservedPageMargins(preserveLayout && mode === "page");
         if (preserveLayout) {
           if (mode === "page") {
             document.documentElement.style.height = "100%";
             document.documentElement.style.overflowX = "hidden";
             document.documentElement.style.overflowY = "hidden";
             document.body.style.boxSizing = "border-box";
+            document.body.style.width = "100vw";
+            document.body.style.maxWidth = "none";
             document.body.style.minHeight = "100vh";
             document.body.style.height = "100vh";
+            document.body.style.marginLeft = "0";
+            document.body.style.marginRight = "0";
+            document.body.style.paddingLeft = "0";
+            document.body.style.paddingRight = "0";
             document.body.style.overflow = "visible";
-            document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-            document.body.style.columnGap = margin * 2 + "px";
-            document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-            document.body.style.webkitColumnGap = margin * 2 + "px";
+            document.body.style.columnWidth = window.innerWidth + "px";
+            document.body.style.columnGap = "0";
+            document.body.style.columnFill = "auto";
+            document.body.style.webkitColumnWidth = window.innerWidth + "px";
+            document.body.style.webkitColumnGap = "0";
+            document.body.style.webkitColumnFill = "auto";
             return;
           }
           document.documentElement.style.height = "auto";
@@ -448,13 +599,21 @@ function preferenceScript(
           document.documentElement.style.height = "100%";
           document.documentElement.style.overflowX = "hidden";
           document.documentElement.style.overflowY = "hidden";
+          document.body.style.width = "100vw";
+          document.body.style.maxWidth = "none";
           document.body.style.minHeight = "100vh";
           document.body.style.height = "100vh";
+          document.body.style.marginLeft = "0";
+          document.body.style.marginRight = "0";
+          document.body.style.paddingLeft = "0";
+          document.body.style.paddingRight = "0";
           document.body.style.overflow = "visible";
-          document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-          document.body.style.columnGap = margin * 2 + "px";
-          document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-          document.body.style.webkitColumnGap = margin * 2 + "px";
+          document.body.style.columnWidth = window.innerWidth + "px";
+          document.body.style.columnGap = "0";
+          document.body.style.columnFill = "auto";
+          document.body.style.webkitColumnWidth = window.innerWidth + "px";
+          document.body.style.webkitColumnGap = "0";
+          document.body.style.webkitColumnFill = "auto";
           return;
         }
 
@@ -1004,6 +1163,28 @@ function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio:
       function pageCount() {
         return Math.max(1, Math.round(Math.max(0, document.documentElement.scrollWidth - window.innerWidth) / pageStep()) + 1);
       }
+      function syncPreservedPageMargins(active) {
+        var id = "inbox-preserved-page-margins";
+        var existing = document.getElementById(id);
+        if (!active) {
+          document.documentElement.classList.remove("inbox-reader-page");
+          if (existing) existing.remove();
+          return;
+        }
+
+        document.documentElement.classList.add("inbox-reader-page");
+        var style = existing || document.createElement("style");
+        style.id = id;
+        style.textContent =
+          "html.inbox-reader-page body > :not(script):not(style) {" +
+          "box-sizing: border-box;" +
+          "padding-left: " + margin + "px;" +
+          "padding-right: " + margin + "px;" +
+          "-webkit-box-decoration-break: clone;" +
+          "box-decoration-break: clone;" +
+          "}";
+        if (!existing && document.head) document.head.appendChild(style);
+      }
       function applyInitialLayout() {
         document.documentElement.style.background = "${theme.background}";
         document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
@@ -1013,19 +1194,28 @@ function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio:
         if (!document.body) {
           return;
         }
+        syncPreservedPageMargins(preserveLayout && mode === "page");
         if (preserveLayout) {
           if (mode === "page") {
             document.documentElement.style.height = "100%";
             document.documentElement.style.overflowX = "hidden";
             document.documentElement.style.overflowY = "hidden";
             document.body.style.boxSizing = "border-box";
+            document.body.style.width = "100vw";
+            document.body.style.maxWidth = "none";
             document.body.style.minHeight = "100vh";
             document.body.style.height = "100vh";
+            document.body.style.marginLeft = "0";
+            document.body.style.marginRight = "0";
+            document.body.style.paddingLeft = "0";
+            document.body.style.paddingRight = "0";
             document.body.style.overflow = "visible";
-            document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-            document.body.style.columnGap = margin * 2 + "px";
-            document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-            document.body.style.webkitColumnGap = margin * 2 + "px";
+            document.body.style.columnWidth = window.innerWidth + "px";
+            document.body.style.columnGap = "0";
+            document.body.style.columnFill = "auto";
+            document.body.style.webkitColumnWidth = window.innerWidth + "px";
+            document.body.style.webkitColumnGap = "0";
+            document.body.style.webkitColumnFill = "auto";
             window.scrollTo(Math.round(restoreRatio * Math.max(1, pageCount() - 1)) * pageStep(), 0);
             return;
           }
@@ -1045,13 +1235,21 @@ function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio:
           document.documentElement.style.height = "100%";
           document.documentElement.style.overflowX = "hidden";
           document.documentElement.style.overflowY = "hidden";
+          document.body.style.width = "100vw";
+          document.body.style.maxWidth = "none";
           document.body.style.minHeight = "100vh";
           document.body.style.height = "100vh";
+          document.body.style.marginLeft = "0";
+          document.body.style.marginRight = "0";
+          document.body.style.paddingLeft = "0";
+          document.body.style.paddingRight = "0";
           document.body.style.overflow = "visible";
-          document.body.style.columnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-          document.body.style.columnGap = margin * 2 + "px";
-          document.body.style.webkitColumnWidth = Math.max(220, window.innerWidth - margin * 2) + "px";
-          document.body.style.webkitColumnGap = margin * 2 + "px";
+          document.body.style.columnWidth = window.innerWidth + "px";
+          document.body.style.columnGap = "0";
+          document.body.style.columnFill = "auto";
+          document.body.style.webkitColumnWidth = window.innerWidth + "px";
+          document.body.style.webkitColumnGap = "0";
+          document.body.style.webkitColumnFill = "auto";
           window.scrollTo(Math.round(restoreRatio * Math.max(1, pageCount() - 1)) * pageStep(), 0);
           return;
         }
@@ -1629,8 +1827,8 @@ export default function ReaderScreen() {
 
     return preserveEpubLayout && currentChapter.htmlPath
       ? { uri: currentChapter.htmlPath }
-      : { html: readerHtmlForText(currentChapter, preferences, readerInsets, restoreRatio) };
-  }, [book, currentChapter, preferences, preserveEpubLayout, readerInsets, restoreRatio]);
+      : { html: readerHtmlForText(currentChapter, preferences, readerInsets, restoreRatio, currentIndex, chapters.length) };
+  }, [book, chapters.length, currentChapter, currentIndex, preferences, preserveEpubLayout, readerInsets, restoreRatio]);
 
   useEffect(() => {
     const nextInsets = JSON.stringify(readerInsets);

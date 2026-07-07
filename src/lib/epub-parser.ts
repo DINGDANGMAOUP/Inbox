@@ -28,7 +28,7 @@ export type ParsedBook = {
   resources?: ParsedResource[];
 };
 
-export const EPUB_LAYOUT_MARKER = 'name="inbox-epub-layout" content="2"';
+export const EPUB_LAYOUT_MARKER = 'name="inbox-epub-layout" content="4"';
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -118,7 +118,58 @@ function readerHeadAdditions() {
   <meta ${EPUB_LAYOUT_MARKER}>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <style>
-    html { background: var(--reader-bg, transparent); }
+    :root {
+      --reader-font-size: 19px;
+      --reader-line-height: 1.7;
+    }
+    html {
+      background: var(--reader-bg, transparent);
+      -webkit-text-size-adjust: 100%;
+    }
+    body {
+      background: var(--reader-bg, transparent);
+      color: var(--reader-text, inherit);
+      font-size: var(--reader-font-size, 19px);
+      line-height: var(--reader-line-height, 1.7);
+      text-rendering: optimizeLegibility;
+    }
+    :where(p) {
+      margin: 0;
+      margin-block: 0;
+      text-align: justify;
+      text-indent: 2em;
+      text-justify: inter-character;
+      line-break: strict;
+      word-break: normal;
+      overflow-wrap: break-word;
+      hanging-punctuation: allow-end;
+    }
+    :where(h1, h2, h3, h4, h5, h6, li, blockquote, pre, figure, figcaption, table, th, td) {
+      text-indent: 0;
+    }
+    :where(h1, h2, h3, h4, h5, h6) {
+      break-after: avoid;
+      page-break-after: avoid;
+      text-align: center;
+      text-wrap: balance;
+    }
+    :where(body > h1:first-of-type, body > h2:first-of-type, section > h1:first-child, section > h2:first-child, article > h1:first-child, article > h2:first-child) {
+      margin-block-start: 3.6em;
+      margin-block-end: 1.8em;
+      font-size: 1.65em;
+      font-weight: 600;
+      line-height: 1.28;
+      letter-spacing: 0.05em;
+    }
+    :where(body > h1:first-of-type, body > h2:first-of-type, section > h1:first-child, section > h2:first-child, article > h1:first-child, article > h2:first-child)::after {
+      content: "";
+      display: block;
+      width: 3.2em;
+      height: 1px;
+      margin: 1.4em auto 0;
+      background: currentColor;
+      opacity: 0.28;
+    }
     img, svg { max-width: 100%; height: auto; }
     .inbox-custom-selection {
       background: rgba(167, 121, 78, 0.28);
@@ -152,13 +203,17 @@ function readerHeadAdditions() {
 
 function readerBodyScript() {
   return `<script>
+    function readerTextRoot() {
+      return document.getElementById("book-content") || document.body;
+    }
     window.__INBOX_CAPTURE_SELECTION = function() {
       var selection = window.getSelection();
       var selectedText = selection ? selection.toString().trim() : "";
+      var textRoot = readerTextRoot();
       window.ReactNativeWebView.postMessage(JSON.stringify({
         type: selectedText ? "selection" : "selection-empty",
         selectedText: selectedText,
-        offset: selectedText ? document.body.innerText.indexOf(selectedText) : -1
+        offset: selectedText ? textRoot.innerText.indexOf(selectedText) : -1
       }));
     };
     window.addEventListener("scroll", function() {
