@@ -139,6 +139,13 @@ def save_icon_assets() -> None:
     icon_canvas(1024, {**palette, "container": "#000000"}, transparent_bg=True, monochrome=True).save(ASSETS / "android-icon-monochrome.png")
 
 
+def save_splash_mark() -> None:
+    image = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw_brand_symbol(draw, (92, 82, 420, 428), "#151611", "#FBF8F2", "#2F6B4F")
+    image.save(ASSETS / "splash-mark.png")
+
+
 def draw_wordmark(filename: str = "moyu-wordmark.png", dark: bool = False) -> None:
     image = Image.new("RGBA", (1500, 520), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
@@ -240,6 +247,7 @@ def save_theme_assets() -> None:
 
 def main() -> None:
     save_icon_assets()
+    save_splash_mark()
     draw_wordmark()
     draw_wordmark("moyu-wordmark-light.png", dark=True)
     draw_logo_board()
