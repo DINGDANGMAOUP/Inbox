@@ -36,6 +36,7 @@ export function M3Pressable({
   disabled,
   accessibilityRole = 'button',
   onStartShouldSetResponderCapture,
+  pointerEvents,
   onPressIn,
   onPressOut,
   children,
@@ -77,6 +78,7 @@ export function M3Pressable({
         onPressOut?.(event);
       }}
       style={[style, animatedStyle]}
+      pointerEvents={captureTouches ? 'box-only' : pointerEvents}
       onStartShouldSetResponderCapture={(event) => {
         return onStartShouldSetResponderCapture?.(event) ?? captureTouches;
       }}

@@ -1,4 +1,6 @@
 import { Image } from "expo-image";
+import { CircularProgressIndicator } from "@expo/ui/jetpack-compose";
+import { size as composeSize } from "@expo/ui/jetpack-compose/modifiers";
 import {
   type ReactNode,
   useCallback,
@@ -10,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -37,6 +40,7 @@ import {
   getInstalledAppVersion,
   openUpdateDownloadLink,
   type RemoteAppVersion,
+  type UpdateDownloadProgress,
 } from "@/lib/app-update-service";
 
 type UpdatePhase =
@@ -60,6 +64,8 @@ export default function AboutScreen() {
   const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
   const [updateMessage, setUpdateMessage] = useState("检查更新");
   const [lastCheckedAt, setLastCheckedAt] = useState<string | undefined>();
+  const [downloadProgress, setDownloadProgress] =
+    useState<UpdateDownloadProgress>();
   const isDeepTheme = resolvedAppTheme === "deep";
   const topBarHeight = insets.top + 56;
 
@@ -80,10 +86,17 @@ export default function AboutScreen() {
 
   const handleDownloadUpdate = useCallback(async (remote: RemoteAppVersion) => {
     setUpdatePhase("downloading");
-    setUpdateMessage("正在下载安装包");
+    setUpdateMessage(`正在下载 Version ${remote.version}`);
+    setDownloadProgress({
+      bytesWritten: 0,
+      totalBytes: remote.apkSize,
+      progress: remote.apkSize ? 0 : undefined,
+    });
 
     try {
-      await downloadAndOpenUpdateInstaller(remote);
+      await downloadAndOpenUpdateInstaller(remote, (progress) => {
+        setDownloadProgress(progress);
+      });
       setUpdatePhase("available");
       setUpdateMessage("已打开安装程序");
     } catch (error) {
@@ -108,6 +121,7 @@ export default function AboutScreen() {
 
     setUpdatePhase("checking");
     setUpdateMessage("正在检查更新");
+    setDownloadProgress(undefined);
     try {
       const result = await checkForGithubAppUpdate();
       setLastCheckedAt(new Date().toISOString());
@@ -160,6 +174,7 @@ export default function AboutScreen() {
         }
 
         setUpdatePhase("available");
+        setUpdateMessage(result.message);
         Alert.alert(
           "发现新版本",
           `最新版本 Version ${result.remote.version}${formatUpdateSize(
@@ -300,6 +315,7 @@ export default function AboutScreen() {
                 updatePhase,
                 updateMessage,
                 lastCheckedAt,
+                downloadProgress,
               )}
               icon={updatePhaseIcon(updatePhase)}
               disabled={
@@ -308,7 +324,14 @@ export default function AboutScreen() {
               onPress={checkUpdate}
               trailing={
                 updatePhase === "checking" || updatePhase === "downloading" ? (
-                  <ActivityIndicator color={theme.accent} />
+                  updatePhase === "downloading" ? (
+                    <DownloadProgressRing
+                      progress={downloadProgress}
+                      theme={theme}
+                    />
+                  ) : (
+                    <ActivityIndicator color={theme.accent} />
+                  )
                 ) : undefined
               }
             />
@@ -416,6 +439,7 @@ function updateRowDetail(
   phase: UpdatePhase,
   message: string,
   lastCheckedAt?: string,
+  downloadProgress?: UpdateDownloadProgress,
 ) {
   if (phase === "idle") {
     return message;
@@ -424,7 +448,7 @@ function updateRowDetail(
     return "正在检查";
   }
   if (phase === "downloading") {
-    return "正在下载";
+    return formatDownloadProgress(downloadProgress);
   }
   if (phase === "available") {
     return message || "发现新版本，可下载";
@@ -441,6 +465,58 @@ function updateRowDetail(
     return "稍后再试";
   }
   return message || "检查失败";
+}
+
+function DownloadProgressRing({
+  theme,
+  progress,
+}: {
+  theme: AboutTheme;
+  progress?: UpdateDownloadProgress;
+}) {
+  const value =
+    typeof progress?.progress === "number"
+      ? Math.max(0, Math.min(1, progress.progress))
+      : undefined;
+  const percent =
+    typeof value === "number" ? Math.round(value * 100) : undefined;
+
+  return (
+    <View
+      accessibilityRole="progressbar"
+      accessibilityValue={
+        percent === undefined
+          ? { text: "正在下载" }
+          : { min: 0, max: 100, now: percent }
+      }
+      style={styles.downloadProgressRing}
+    >
+      {Platform.OS === "android" ? (
+        <CircularProgressIndicator
+          color={theme.accent}
+          gapSize={2}
+          modifiers={[composeSize(42, 42)]}
+          progress={value ?? null}
+          strokeCap="round"
+          strokeWidth={4}
+          trackColor={theme.line}
+        />
+      ) : (
+        <View
+          style={[
+            styles.downloadProgressFallbackRing,
+            { borderColor: theme.line },
+          ]}
+        />
+      )}
+      <Text
+        numberOfLines={1}
+        style={[styles.downloadProgressText, { color: theme.text }]}
+      >
+        {percent === undefined ? "..." : `${percent}%`}
+      </Text>
+    </View>
+  );
 }
 
 function updatePhaseIcon(phase: UpdatePhase): MaterialSymbolName {
@@ -484,8 +560,30 @@ function formatUpdateSize(bytes?: number) {
   if (!bytes || bytes <= 0) {
     return "";
   }
+  return `\n安装包 ${formatBytes(bytes)}`;
+}
+
+function formatDownloadProgress(progress?: UpdateDownloadProgress) {
+  if (!progress) {
+    return "准备下载";
+  }
+  if (progress.totalBytes && progress.totalBytes > 0) {
+    return `正在下载 · ${formatBytes(progress.bytesWritten)} / ${formatBytes(
+      progress.totalBytes,
+    )}`;
+  }
+  if (progress.bytesWritten > 0) {
+    return `正在下载 · 已下载 ${formatBytes(progress.bytesWritten)}`;
+  }
+  return "准备下载";
+}
+
+function formatBytes(bytes: number) {
   const megabytes = bytes / 1024 / 1024;
-  return `\n安装包 ${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
+  if (megabytes >= 1) {
+    return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
+  }
+  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
 }
 
 const styles = StyleSheet.create({
@@ -615,6 +713,26 @@ const styles = StyleSheet.create({
   },
   disabledRow: {
     opacity: 0.68,
+  },
+  downloadProgressRing: {
+    width: 42,
+    height: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  downloadProgressFallbackRing: {
+    position: "absolute",
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 4,
+  },
+  downloadProgressText: {
+    position: "absolute",
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "900",
+    letterSpacing: 0,
   },
   footer: {
     marginTop: "auto",

@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { Host, Icon as MaterialIcon } from '@expo/ui/jetpack-compose';
-import { Platform, StyleSheet, Text, type ImageSourcePropType, type ImageStyle, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, Text, View, type ImageSourcePropType, type ImageStyle, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 
 import AddIcon from '@expo/material-symbols/add.xml';
 import ArrowBackIcon from '@expo/material-symbols/arrow_back.xml';
@@ -95,12 +95,11 @@ export function MaterialSymbol({ name, color, size = 18, description, decorative
 
   if (Platform.OS === 'android') {
     return (
-      <Host
-        matchContents
-        pointerEvents="none"
-        style={[{ width: size, height: size }, style]}>
-        <MaterialIcon source={source} size={size} tint={color} contentDescription={decorative ? undefined : description ?? name} />
-      </Host>
+      <View pointerEvents="none" style={[{ width: size, height: size }, style]}>
+        <Host matchContents pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <MaterialIcon source={source} size={size} tint={color} contentDescription={decorative ? undefined : description ?? name} />
+        </Host>
+      </View>
     );
   }
 

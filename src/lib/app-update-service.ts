@@ -31,6 +31,12 @@ export type RemoteAppVersion = {
   apkSize?: number;
 };
 
+export type UpdateDownloadProgress = {
+  bytesWritten: number;
+  totalBytes?: number;
+  progress?: number;
+};
+
 export type UpdateCheckResult =
   | { status: 'current'; message: string; current: InstalledAppVersion; remote?: RemoteAppVersion }
   | { status: 'available'; message: string; current: InstalledAppVersion; remote: RemoteAppVersion }
@@ -93,7 +99,10 @@ export async function openUpdateDownloadLink(remote?: RemoteAppVersion) {
   await Linking.openURL(url);
 }
 
-export async function downloadAndOpenUpdateInstaller(remote: RemoteAppVersion) {
+export async function downloadAndOpenUpdateInstaller(
+  remote: RemoteAppVersion,
+  onProgress?: (progress: UpdateDownloadProgress) => void,
+) {
   if (!remote.apkUrl) {
     throw new Error('这个版本还没有上传安装包，请稍后再试。');
   }
@@ -116,7 +125,13 @@ export async function downloadAndOpenUpdateInstaller(remote: RemoteAppVersion) {
   });
 
   const fileName = `Inbox-${sanitizeFileSegment(remote.version)}-${remote.buildNumber}.apk`;
-  const result = await FileSystem.downloadAsync(
+  let latestProgress: UpdateDownloadProgress | undefined;
+  onProgress?.({
+    bytesWritten: 0,
+    totalBytes: remote.apkSize,
+    progress: remote.apkSize ? 0 : undefined,
+  });
+  const download = FileSystem.createDownloadResumable(
     remote.apkUrl,
     `${downloadDirectory}${fileName}`,
     {
@@ -124,11 +139,36 @@ export async function downloadAndOpenUpdateInstaller(remote: RemoteAppVersion) {
         Accept: apkMimeType,
       },
     },
+    (progress) => {
+      const totalBytes = progress.totalBytesExpectedToWrite > 0
+        ? progress.totalBytesExpectedToWrite
+        : remote.apkSize;
+      latestProgress = {
+        bytesWritten: progress.totalBytesWritten,
+        totalBytes,
+        progress: totalBytes
+          ? Math.min(1, progress.totalBytesWritten / totalBytes)
+          : undefined,
+      };
+      onProgress?.(latestProgress);
+    },
   );
+  const result = await download.downloadAsync();
+
+  if (!result) {
+    throw new Error('安装包下载已取消。');
+  }
 
   if (result.status < 200 || result.status >= 300) {
     throw new Error(`安装包下载失败：HTTP ${result.status}`);
   }
+
+  const finalTotalBytes = latestProgress?.totalBytes ?? remote.apkSize;
+  onProgress?.({
+    bytesWritten: finalTotalBytes ?? latestProgress?.bytesWritten ?? 0,
+    totalBytes: finalTotalBytes,
+    progress: 1,
+  });
 
   const contentUri = await FileSystem.getContentUriAsync(result.uri);
   await IntentLauncher.startActivityAsync(androidViewAction, {
