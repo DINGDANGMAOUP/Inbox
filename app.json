@@ -2,7 +2,7 @@
   "expo": {
     "name": "墨屿",
     "slug": "Inbox",
-    "version": "0.0.9",
+    "version": "0.0.10",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "inbox",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.dingdangmaoup.inkbox",
-      "versionCode": 16,
+      "versionCode": 17,
       "adaptiveIcon": {
         "backgroundColor": "#F7F3EA",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

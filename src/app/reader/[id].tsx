@@ -471,6 +471,7 @@ export default function ReaderScreen() {
   const [activeNoteAnchorKey, setActiveNoteAnchorKey] = useState<string | null>(null);
   const [activeNoteAnchorPoint, setActiveNoteAnchorPoint] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [noteWindowOffset, setNoteWindowOffset] = useState({ x: 0, y: 0 });
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -638,6 +639,7 @@ export default function ReaderScreen() {
     () => ({ transform: [{ translateX: noteWindowOffset.x }, { translateY: noteWindowOffset.y }] }),
     [noteWindowOffset.x, noteWindowOffset.y]
   );
+  const noteComposerBottomInset = keyboardHeight > 0 ? keyboardHeight + 10 : Math.max(12, insets.bottom + 10);
   const readiumDecorations = useMemo<InboxReaderDecoration[]>(() => {
     if (!useNativeReadium) {
       return [];
@@ -822,6 +824,17 @@ export default function ReaderScreen() {
       if (noticeTimer.current) {
         clearTimeout(noticeTimer.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, (event) => setKeyboardHeight(event.endCoordinates.height));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
     };
   }, []);
 
@@ -1816,7 +1829,7 @@ export default function ReaderScreen() {
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           pointerEvents="box-none"
-          style={[styles.noteComposerLayer, { paddingBottom: Math.max(12, insets.bottom + 10) }]}>
+          style={[styles.noteComposerLayer, { paddingBottom: noteComposerBottomInset }]}>
           <Pressable accessibilityRole="button" accessibilityLabel="关闭笔记" onPress={dismissSelectionNote} style={styles.noteComposerBackdrop} />
           <Animated.View
             entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
