@@ -9,6 +9,8 @@ import {
   Alert,
   BackHandler,
   Keyboard,
+  Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,8 +20,8 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import WebView, { type WebViewMessageEvent } from 'react-native-webview';
 
+import { InboxReaderView, type InboxReaderDecoration, type InboxReaderDecorationPressEvent, type InboxReaderExternalLinkEvent, type InboxReaderLocationEvent, type InboxReaderSelection, type InboxReaderTapEvent, type InboxReaderViewRef } from '../../../modules/inbox-reader';
 import { AdaptiveSurface } from '@/components/reader/adaptive-surface';
 import { IconButton } from '@/components/reader/icon-button';
 import { M3FilterChip, M3Screen, M3SegmentedControl, M3StatePanel, M3Stepper } from '@/components/reader/m3';
@@ -27,12 +29,13 @@ import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brand } from '@/constants/brand';
-import { readerFontCssStack, readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
+import { readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
 import { readerThemeAssets } from '@/constants/theme-assets';
 import {
   createAnnotation,
   deleteAnnotation,
   getReaderPreferences,
+  getChapter,
   listAnnotations,
   openBook,
   saveProgress,
@@ -45,19 +48,19 @@ import type { Annotation, Book, Chapter, ReaderPreferences, ReaderTheme, SearchR
 type Panel = 'toc' | 'search' | 'notes' | 'settings' | null;
 type ReaderPanel = Exclude<Panel, null>;
 type AnnotationFilter = 'all' | Annotation['type'];
-type ReaderInsets = { top: number; bottom: number };
 type TextSelection = {
   selectedText: string;
   offset: number;
   x: number;
   y: number;
+  height?: number;
+  locator?: string;
 };
-type ReaderAnnotationMark = {
-  id: string;
-  type: 'highlight' | 'note';
-  selectedText: string;
-  quote?: string;
-  offset?: number;
+type PendingReadiumNavigation = {
+  index: number;
+  ratio: number;
+  token: number;
+  timeout: ReturnType<typeof setTimeout>;
 };
 
 const annotationLabels: Record<Annotation['type'], string> = {
@@ -84,6 +87,7 @@ const annotationFilters: { value: AnnotationFilter; label: string }[] = [
   { value: 'highlight', label: '划线' },
   { value: 'note', label: '笔记' },
 ];
+const readiumQuoteContextLength = 32;
 
 const readerPanelTabs: { value: ReaderPanel; label: string; icon: MaterialSymbolName }[] = [
   { value: 'toc', label: '目录', icon: 'list.bullet' },
@@ -102,52 +106,9 @@ function bookTitleLabel(title: string) {
   return cleanChapterTitle(title, title || '未命名书籍');
 }
 
-function cleanInlineContent(input: string) {
-  return input
-    .replace(/\\r/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\\?[\w-]*pq[\w.-]*\.(?:bmp|png|jpe?g|gif)\\?/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function chapterTitleKey(input: string) {
-  const cleaned = cleanChapterTitle(input, '');
-  if (!cleaned) {
-    return '';
-  }
-
-  return chapterLabel(cleaned)
-    .normalize('NFKC')
-    .replace(/[\s　:：,，.。·\-—_]+/g, '')
-    .toLowerCase();
-}
-
-function shouldShowChapterHeading(title: string, chapterCount: number) {
-  const label = chapterLabel(title);
-  return chapterCount > 1 || !/^(?:正文|未命名文本)$/.test(label);
-}
-
-function isDuplicateChapterHeading(block: string, title: string) {
-  const blockKey = chapterTitleKey(cleanInlineContent(block));
-  const titleKey = chapterTitleKey(title);
-  return Boolean(blockKey && titleKey && blockKey === titleKey);
-}
-
-function renderChapterHeading(chapter: Chapter, chapterIndex: number, chapterCount: number) {
-  const title = chapterLabel(chapter.title);
-  const kicker = chapterCount > 1 ? `第 ${chapterIndex + 1} / ${chapterCount} 章` : '正文';
-
-  return `<header class="chapter-heading">
-    <div class="chapter-heading-kicker">${escapeHtml(kicker)}</div>
-    <h1>${escapeHtml(title)}</h1>
-    <div class="chapter-heading-rule" aria-hidden="true"></div>
-  </header>`;
-}
-
 function parseAnnotationPosition(position: string) {
   try {
-    const parsed = JSON.parse(position) as { chapterId?: string; offset?: number; quote?: string };
+    const parsed = JSON.parse(position) as { chapterId?: string; offset?: number; quote?: string; locator?: string };
     return parsed;
   } catch {
     return {};
@@ -159,8 +120,215 @@ function ratioFromOffset(chapter: Chapter | undefined, offset?: number) {
     return 0;
   }
 
-  const contentLength = Math.max(1, chapter.textContent.length);
+  const contentLength = Math.max(1, chapter.textLength ?? chapter.textContent.length);
   return Math.max(0, Math.min(0.96, offset / contentLength));
+}
+
+function clampRatio(value: number) {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function normalizeReadiumHref(href?: string | null) {
+  return (href ?? '')
+    .replace(/#.*$/, '')
+    .replace(/^\.?\//, '');
+}
+
+function readiumHrefFromChapter(chapter: Chapter) {
+  return normalizeReadiumHref(chapter.href.replace(/#chunk-\d+$/, ''));
+}
+
+function readiumHrefCandidatesFromChapter(chapter: Chapter) {
+  const href = readiumHrefFromChapter(chapter);
+  const withoutOpfBase = href.replace(/^[^/]+\//, '');
+  return withoutOpfBase && withoutOpfBase !== href ? [href, withoutOpfBase] : [href];
+}
+
+function readiumHrefMatchesChapter(chapter: Chapter, href: string) {
+  const normalized = normalizeReadiumHref(href);
+  return readiumHrefCandidatesFromChapter(chapter).includes(normalized);
+}
+
+function readiumLocatorForChapter(chapter: Chapter, progression = 0, href = readiumHrefFromChapter(chapter)) {
+  return JSON.stringify({
+    href: normalizeReadiumHref(href),
+    type: 'application/xhtml+xml',
+    locations: { progression: clampRatio(progression) },
+  });
+}
+
+function readiumLocatorForOffset(chapter: Chapter, offset: number, highlight?: string) {
+  const safeOffset = Math.max(0, Math.min(chapter.textContent.length, Number.isFinite(offset) ? offset : 0));
+  const paragraph = readiumParagraphLocator(chapter, safeOffset);
+  const trimmedHighlight = highlight?.trim();
+  const localStart = trimmedHighlight ? paragraph.localText.indexOf(trimmedHighlight, paragraph.localOffset) : -1;
+  const quoteStart = localStart >= 0 ? localStart : paragraph.localOffset;
+  const quoteEnd = trimmedHighlight ? quoteStart + trimmedHighlight.length : quoteStart;
+
+  return JSON.stringify({
+    href: readiumHrefFromChapter(chapter),
+    type: 'application/xhtml+xml',
+    locations: {
+      progression: ratioFromOffset(chapter, safeOffset),
+      cssSelector: paragraph.cssSelector,
+    },
+    text: trimmedHighlight
+      ? {
+          before: paragraph.localText.slice(Math.max(0, quoteStart - readiumQuoteContextLength), quoteStart),
+          highlight: trimmedHighlight,
+          after: paragraph.localText.slice(quoteEnd, quoteEnd + readiumQuoteContextLength),
+        }
+      : undefined,
+  });
+}
+
+function readiumHrefFromLocator(locator: string) {
+  try {
+    return normalizeReadiumHref((JSON.parse(locator) as { href?: string }).href);
+  } catch {
+    return '';
+  }
+}
+
+function parseReadiumLocator(locator?: string | null) {
+  if (!locator) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(locator) as {
+      href?: string;
+      type?: string;
+      locations?: { progression?: number; cssSelector?: string };
+      text?: { before?: string; highlight?: string; after?: string };
+    };
+  } catch {
+    return null;
+  }
+}
+
+function chapterFromReadiumLocator(chapters: Chapter[], locator?: string) {
+  const href = locator ? readiumHrefFromLocator(locator) : '';
+  const index = chapters.findIndex((chapter) => readiumHrefMatchesChapter(chapter, href));
+  return index >= 0 ? { chapter: chapters[index], index } : null;
+}
+
+function findAnnotationOffset(chapterText: string, highlight: string, position: ReturnType<typeof parseAnnotationPosition>, locator?: ReturnType<typeof parseReadiumLocator>) {
+  const text = chapterText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const locatorText = locator?.text;
+  const locatorHighlight = locatorText?.highlight?.trim() || highlight;
+  const before = locatorText?.before ?? '';
+  const after = locatorText?.after ?? '';
+
+  if (before) {
+    for (const size of [160, 120, 80, 48, 24]) {
+      const beforeTail = before.slice(-size);
+      if (!beforeTail) {
+        continue;
+      }
+      const index = text.indexOf(beforeTail + locatorHighlight);
+      if (index >= 0) {
+        return index + beforeTail.length;
+      }
+    }
+  }
+
+  if (after) {
+    for (const size of [160, 120, 80, 48, 24]) {
+      const afterHead = after.slice(0, size);
+      if (!afterHead) {
+        continue;
+      }
+      const index = text.indexOf(locatorHighlight + afterHead);
+      if (index >= 0) {
+        return index;
+      }
+    }
+  }
+
+  const quote = position.quote ?? highlight;
+  let offset = typeof position.offset === 'number' ? position.offset : -1;
+  if (offset < 0 || text.slice(offset, offset + quote.length) !== quote) {
+    offset = text.indexOf(quote);
+  }
+  if (offset < 0) {
+    offset = text.indexOf(highlight);
+  }
+
+  return offset;
+}
+
+function readiumParagraphLocator(chapter: Chapter, offset: number) {
+  const text = chapter.textContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = text.split('\n');
+  let cursor = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
+    const line = rawLine.trimEnd();
+    const end = cursor + rawLine.length;
+    if (line && offset >= cursor && offset <= end) {
+      return {
+        cssSelector: `body > section > p:nth-of-type(${index + 1})`,
+        localText: line,
+        localOffset: Math.max(0, Math.min(line.length, offset - cursor)),
+      };
+    }
+    cursor = end + 1;
+  }
+
+  return {
+    cssSelector: 'body > section',
+    localText: text,
+    localOffset: Math.max(0, Math.min(text.length, offset)),
+  };
+}
+
+function readiumLocatorForAnnotation(annotation: Annotation, chapter?: Chapter) {
+  const position = parseAnnotationPosition(annotation.position);
+  const storedLocator = parseReadiumLocator(position.locator);
+  if (storedLocator) {
+    return position.locator;
+  }
+  if (!chapter || !annotation.selectedText) {
+    return position.locator ?? null;
+  }
+
+  const highlight = annotation.selectedText;
+  const offset = findAnnotationOffset(chapter.textContent, highlight, position);
+  if (offset < 0) {
+    return position.locator ?? null;
+  }
+
+  const paragraph = readiumParagraphLocator(chapter, offset);
+  const localStart = paragraph.localText.indexOf(highlight, paragraph.localOffset);
+  const quoteStart = localStart >= 0 ? localStart : paragraph.localOffset;
+  const quoteEnd = quoteStart + highlight.length;
+  return JSON.stringify({
+    href: readiumHrefFromChapter(chapter),
+    type: 'application/xhtml+xml',
+    locations: {
+      progression: ratioFromOffset(chapter, offset),
+      cssSelector: paragraph.cssSelector,
+    },
+    text: {
+      before: paragraph.localText.slice(Math.max(0, quoteStart - readiumQuoteContextLength), quoteStart),
+      highlight,
+      after: paragraph.localText.slice(quoteEnd, quoteEnd + readiumQuoteContextLength),
+    },
+  });
+}
+
+function canUseReadium(book: Book | null) {
+  if (Platform.OS !== 'android' || !book?.publicationUri) {
+    return false;
+  }
+
+  if (book.format === 'epub') {
+    return true;
+  }
+
+  return book.publicationUri.split(/[?#]/)[0]?.toLowerCase().endsWith('.epub') ?? false;
 }
 
 function formatAnnotationTime(value: string) {
@@ -174,1101 +342,6 @@ function formatAnnotationTime(value: string) {
   const hour = String(date.getHours()).padStart(2, '0');
   const minute = String(date.getMinutes()).padStart(2, '0');
   return `${month}/${day} ${hour}:${minute}`;
-}
-
-function renderTextBlock(block: string) {
-  const trimmed = cleanInlineContent(block);
-  if (!trimmed || /^内容[:：]?$/i.test(trimmed)) {
-    return null;
-  }
-
-  const catalogue = trimmed.match(/^<\s*目录\s*>\s*(.+)$/);
-  if (catalogue?.[1]) {
-    return `<p class="section-path">${escapeHtml(catalogue[1]).replace(/\\/g, ' / ')}</p>`;
-  }
-
-  const heading = trimmed.match(/^<\s*(?:篇名|卷名|章名|标题|title)\s*>\s*(.+)$/i);
-  if (heading?.[1]) {
-    return `<h2>${escapeHtml(cleanChapterTitle(heading[1], '正文'))}</h2>`;
-  }
-
-  const content = trimmed.replace(/^内容[:：]\s*/i, '').trim();
-  if (!content) {
-    return null;
-  }
-
-  return `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`;
-}
-
-function readerHtmlForText(chapter: Chapter, preferences: ReaderPreferences, readerInsets: ReaderInsets, restoreRatio: number, chapterIndex: number, chapterCount: number) {
-  const theme = brand.readerThemes[preferences.readerTheme];
-  const fontStack = readerFontCssStack(preferences.fontFamily);
-  const initialInsets = {
-    top: Math.max(32, Math.round(readerInsets.top)),
-    bottom: Math.max(48, Math.round(readerInsets.bottom)),
-  };
-  const pageModeCss =
-    preferences.readingMode === 'page'
-      ? `
-    html {
-      height: 100%;
-      overflow-x: hidden;
-      overflow-y: hidden;
-    }
-    body {
-      width: 100vw;
-      max-width: none;
-      min-height: 100vh;
-      height: 100vh;
-      margin-left: 0;
-      margin-right: 0;
-      padding-left: 0;
-      padding-right: 0;
-      overflow: visible;
-      column-width: 100vw;
-      column-gap: 0;
-      column-fill: auto;
-      -webkit-column-width: 100vw;
-      -webkit-column-gap: 0;
-      -webkit-column-fill: auto;
-    }
-    .chapter-heading,
-    .book-content {
-      box-sizing: border-box;
-      padding-left: ${preferences.margin}px;
-      padding-right: ${preferences.margin}px;
-      -webkit-box-decoration-break: clone;
-      box-decoration-break: clone;
-    }`
-      : '';
-  const showChapterHeading = shouldShowChapterHeading(chapter.title, chapterCount);
-  const textBlocks = chapter.textContent
-    .replace(/\\r/g, '\n')
-    .replace(/\r/g, '\n')
-    .split(/\n{1,}/);
-  let checkedOpeningBlock = false;
-  const paragraphs = textBlocks
-    .filter((block) => {
-      if (!showChapterHeading || checkedOpeningBlock) {
-        return true;
-      }
-      if (!cleanInlineContent(block)) {
-        return true;
-      }
-
-      checkedOpeningBlock = true;
-      return !isDuplicateChapterHeading(block, chapter.title);
-    })
-    .map(renderTextBlock)
-    .filter(Boolean)
-    .join('\n');
-
-  return `<!doctype html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <style>
-    html {
-      background: ${theme.background};
-    }
-    body {
-      margin: 0;
-      padding: ${initialInsets.top}px ${preferences.margin}px ${initialInsets.bottom}px;
-      background: var(--reader-bg, ${theme.background});
-      color: var(--reader-text, ${theme.text});
-      font-family: var(--reader-font-family, ${fontStack});
-      font-size: var(--reader-font-size, ${preferences.fontSize}px);
-      line-height: var(--reader-line-height, ${preferences.lineHeight});
-      letter-spacing: 0;
-      text-align: justify;
-      text-justify: inter-character;
-      text-rendering: optimizeLegibility;
-      line-break: strict;
-      word-break: normal;
-      overflow-wrap: break-word;
-      hanging-punctuation: allow-end;
-      box-sizing: border-box;
-      max-width: 720px;
-      margin-left: auto;
-      margin-right: auto;
-      -webkit-user-select: none;
-      user-select: none;
-      -webkit-touch-callout: none;
-    }
-    ${pageModeCss}
-    .chapter-heading {
-      padding: 4.8em 0 3em;
-      text-align: center;
-      break-after: avoid;
-      page-break-after: avoid;
-    }
-    .chapter-heading-kicker {
-      margin-bottom: 1.4em;
-      color: var(--reader-muted, ${theme.muted});
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.68em;
-      font-weight: 800;
-      letter-spacing: 0.18em;
-      line-height: 1.2;
-    }
-    .chapter-heading h1 {
-      max-width: 18em;
-      margin: 0 auto;
-      font-size: 1.74em;
-      font-weight: 600;
-      line-height: 1.28;
-      letter-spacing: 0.05em;
-      text-align: center;
-      text-indent: 0;
-      text-wrap: balance;
-    }
-    .chapter-heading-rule {
-      width: 3.2em;
-      height: 1px;
-      margin: 1.6em auto 0;
-      background: currentColor;
-      opacity: 0.28;
-    }
-    .book-content p {
-      margin: 0;
-      text-indent: 2em;
-    }
-    .book-content h2 {
-      margin: 2.4em 0 1.1em;
-      font-size: 1.2em;
-      font-weight: 600;
-      line-height: 1.28;
-      text-align: center;
-      text-indent: 0;
-      text-wrap: balance;
-    }
-    .book-content .section-path {
-      margin: 2em 0 1em;
-      color: var(--reader-muted, ${theme.muted});
-      font-size: 0.82em;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-weight: 700;
-      text-align: center;
-      text-indent: 0;
-    }
-    .inbox-custom-selection {
-      background: rgba(167, 121, 78, 0.28);
-      border-radius: 0.16em;
-      -webkit-box-decoration-break: clone;
-      box-decoration-break: clone;
-    }
-    .inbox-saved-annotation {
-      border-radius: 0.12em;
-      cursor: pointer;
-      -webkit-box-decoration-break: clone;
-      box-decoration-break: clone;
-    }
-    .inbox-saved-highlight {
-      background: rgba(216, 235, 213, 0.36);
-      text-decoration: underline;
-      text-decoration-color: rgba(47, 107, 79, 0.72);
-      text-decoration-thickness: 2px;
-      text-underline-offset: 0.18em;
-    }
-    .inbox-saved-note {
-      background: rgba(226, 230, 189, 0.28);
-      text-decoration: underline dotted;
-      text-decoration-color: rgba(94, 96, 67, 0.82);
-      text-decoration-thickness: 2px;
-      text-underline-offset: 0.2em;
-    }
-  </style>
-</head>
-<body>
-  ${showChapterHeading ? renderChapterHeading(chapter, chapterIndex, chapterCount) : ''}
-  <main id="book-content" class="book-content">
-    ${paragraphs}
-  </main>
-  ${initialReaderPositionScript(preferences, restoreRatio)}
-  ${readerScript()}
-</body>
-</html>`;
-}
-
-function initialReaderPositionScript(preferences: ReaderPreferences, restoreRatio: number) {
-  return `<script>
-    (function() {
-      var mode = "${preferences.readingMode}";
-      var restoreRatio = ${restoreRatio};
-      function pageStep() {
-        return Math.max(1, window.innerWidth);
-      }
-      function pageCount() {
-        return Math.max(1, Math.round(Math.max(0, Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0) - window.innerWidth) / pageStep()) + 1);
-      }
-      if (mode === "page") {
-        var targetPage = Math.round(restoreRatio * Math.max(1, pageCount() - 1));
-        window.scrollTo(targetPage * pageStep(), 0);
-      }
-    })();
-  </script>`;
-}
-
-function escapeHtml(input: string) {
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function readerScript() {
-  return `<script>
-    function readerTextRoot() {
-      return document.getElementById("book-content") || document.body;
-    }
-    window.__INBOX_CAPTURE_SELECTION = function() {
-      var selection = window.getSelection();
-      var selectedText = selection ? selection.toString().trim() : "";
-      var range = selection && selection.rangeCount ? selection.getRangeAt(0) : null;
-      var rect = range && range.getBoundingClientRect ? range.getBoundingClientRect() : null;
-      var textRoot = readerTextRoot();
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: selectedText ? "selection-menu" : "selection-empty",
-        selectedText: selectedText,
-        offset: selectedText ? textRoot.innerText.indexOf(selectedText) : -1,
-        x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
-        y: rect ? rect.bottom : 96
-      }));
-    };
-    document.addEventListener("contextmenu", function(event) {
-      event.preventDefault();
-    });
-    window.addEventListener("scroll", function() {
-      var max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: "progress",
-        ratio: Math.min(1, Math.max(0, window.scrollY / max))
-      }));
-    }, { passive: true });
-  </script>`;
-}
-
-function preferenceScript(
-  preferences: ReaderPreferences,
-  restoreRatio: number,
-  reduceMotion: boolean,
-  readerUiActive: boolean,
-  readerPanelActive: boolean,
-  readerInsets: ReaderInsets,
-  preserveLayout: boolean
-) {
-  const theme = brand.readerThemes[preferences.readerTheme];
-  const fontStack = readerFontCssStack(preferences.fontFamily);
-  const initialInsets = {
-    top: Math.max(32, Math.round(readerInsets.top)),
-    bottom: Math.max(48, Math.round(readerInsets.bottom)),
-  };
-  return `
-    (function() {
-      var preserveLayout = ${preserveLayout ? 'true' : 'false'};
-      var mode = "${preferences.readingMode}";
-      var margin = ${preferences.margin};
-      var reduceMotion = ${reduceMotion ? 'true' : 'false'};
-      var restoreRatio = ${restoreRatio};
-      var initialInsets = ${JSON.stringify(initialInsets)};
-      window.__INBOX_READER_INSETS__ = initialInsets;
-      window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'};
-      window.__INBOX_PANEL_ACTIVE__ = ${readerPanelActive ? 'true' : 'false'};
-
-      function postMessage(payload) {
-        window.ReactNativeWebView.postMessage(JSON.stringify(payload));
-      }
-
-      function pageStep() {
-        return Math.max(1, window.innerWidth);
-      }
-
-      function maxHorizontalScroll() {
-        return Math.max(0, Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0) - window.innerWidth);
-      }
-
-      function maxVerticalScroll() {
-        return Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-      }
-
-      function pageCount() {
-        return Math.max(1, Math.round(maxHorizontalScroll() / pageStep()) + 1);
-      }
-
-      function pageIndex() {
-        return Math.min(pageCount() - 1, Math.max(0, Math.round(window.scrollX / pageStep())));
-      }
-
-      function reportProgress() {
-        if (mode === "page") {
-          var total = pageCount();
-          var page = pageIndex();
-          postMessage({
-            type: "progress",
-            ratio: total <= 1 ? 0 : page / Math.max(1, total - 1),
-            pageIndex: page + 1,
-            pageCount: total
-          });
-          return;
-        }
-
-        postMessage({
-          type: "progress",
-          ratio: Math.min(1, Math.max(0, window.scrollY / maxVerticalScroll()))
-        });
-      }
-
-      function normalizedInsets() {
-        var next = window.__INBOX_READER_INSETS__ || initialInsets;
-        return {
-          top: Math.max(32, Math.round(Number(next.top) || initialInsets.top)),
-          bottom: Math.max(48, Math.round(Number(next.bottom) || initialInsets.bottom))
-        };
-      }
-
-      function syncPreservedPageMargins(active) {
-        var id = "inbox-preserved-page-margins";
-        var existing = document.getElementById(id);
-        if (!active) {
-          document.documentElement.classList.remove("inbox-reader-page");
-          if (existing) existing.remove();
-          return;
-        }
-
-        document.documentElement.classList.add("inbox-reader-page");
-        var style = existing || document.createElement("style");
-        style.id = id;
-        style.textContent =
-          "html.inbox-reader-page body > :not(script):not(style) {" +
-          "box-sizing: border-box;" +
-          "padding-left: " + margin + "px;" +
-          "padding-right: " + margin + "px;" +
-          "-webkit-box-decoration-break: clone;" +
-          "box-decoration-break: clone;" +
-          "}";
-        if (!existing && document.head) document.head.appendChild(style);
-      }
-
-      function applyMode() {
-        var safeInsets = normalizedInsets();
-        document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
-        document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
-        document.documentElement.style.setProperty("--reader-font-family", ${JSON.stringify(fontStack)});
-        document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
-        document.documentElement.style.setProperty("--reader-text", "${theme.text}");
-        document.documentElement.style.background = "${theme.background}";
-        disableNativeSelection();
-        syncPreservedPageMargins(preserveLayout && mode === "page");
-        if (preserveLayout) {
-          if (mode === "page") {
-            document.documentElement.style.height = "100%";
-            document.documentElement.style.overflowX = "hidden";
-            document.documentElement.style.overflowY = "hidden";
-            document.body.style.boxSizing = "border-box";
-            document.body.style.width = "100vw";
-            document.body.style.maxWidth = "none";
-            document.body.style.minHeight = "100vh";
-            document.body.style.height = "100vh";
-            document.body.style.marginLeft = "0";
-            document.body.style.marginRight = "0";
-            document.body.style.paddingLeft = "0";
-            document.body.style.paddingRight = "0";
-            document.body.style.overflow = "visible";
-            document.body.style.columnWidth = window.innerWidth + "px";
-            document.body.style.columnGap = "0";
-            document.body.style.columnFill = "auto";
-            document.body.style.webkitColumnWidth = window.innerWidth + "px";
-            document.body.style.webkitColumnGap = "0";
-            document.body.style.webkitColumnFill = "auto";
-            return;
-          }
-          document.documentElement.style.height = "auto";
-          document.documentElement.style.overflowX = "hidden";
-          document.documentElement.style.overflowY = "auto";
-          return;
-        }
-        document.body.style.background = "${theme.background}";
-        document.body.style.color = "${theme.text}";
-        document.body.style.fontSize = "${preferences.fontSize}px";
-        document.body.style.lineHeight = "${preferences.lineHeight}";
-        document.body.style.boxSizing = "border-box";
-        document.body.style.paddingLeft = margin + "px";
-        document.body.style.paddingRight = margin + "px";
-        document.body.style.paddingTop = safeInsets.top + "px";
-        document.body.style.paddingBottom = safeInsets.bottom + "px";
-
-        if (mode === "page") {
-          document.documentElement.style.height = "100%";
-          document.documentElement.style.overflowX = "hidden";
-          document.documentElement.style.overflowY = "hidden";
-          document.body.style.width = "100vw";
-          document.body.style.maxWidth = "none";
-          document.body.style.minHeight = "100vh";
-          document.body.style.height = "100vh";
-          document.body.style.marginLeft = "0";
-          document.body.style.marginRight = "0";
-          document.body.style.paddingLeft = "0";
-          document.body.style.paddingRight = "0";
-          document.body.style.overflow = "visible";
-          document.body.style.columnWidth = window.innerWidth + "px";
-          document.body.style.columnGap = "0";
-          document.body.style.columnFill = "auto";
-          document.body.style.webkitColumnWidth = window.innerWidth + "px";
-          document.body.style.webkitColumnGap = "0";
-          document.body.style.webkitColumnFill = "auto";
-          return;
-        }
-
-        document.documentElement.style.height = "auto";
-        document.documentElement.style.overflowX = "hidden";
-        document.documentElement.style.overflowY = "auto";
-        document.body.style.minHeight = "auto";
-        document.body.style.height = "auto";
-        document.body.style.overflow = "visible";
-        document.body.style.columnWidth = "auto";
-        document.body.style.columnGap = "normal";
-        document.body.style.webkitColumnWidth = "auto";
-        document.body.style.webkitColumnGap = "normal";
-      }
-
-      window.__INBOX_APPLY_READER_LAYOUT__ = function(nextInsets, uiActive, panelActive) {
-        if (nextInsets) {
-          window.__INBOX_READER_INSETS__ = {
-            top: Math.max(0, Number(nextInsets.top) || 0),
-            bottom: Math.max(0, Number(nextInsets.bottom) || 0)
-          };
-        }
-        window.__INBOX_UI_ACTIVE__ = !!uiActive;
-        window.__INBOX_PANEL_ACTIVE__ = !!panelActive;
-        var ratio = mode === "page"
-          ? (pageCount() <= 1 ? 0 : pageIndex() / Math.max(1, pageCount() - 1))
-          : window.scrollY / maxVerticalScroll();
-        applyMode();
-        setTimeout(function() {
-          if (mode === "page") {
-            window.scrollTo({ left: Math.round(ratio * Math.max(1, pageCount() - 1)) * pageStep(), top: 0, behavior: "auto" });
-          } else {
-            window.scrollTo({ left: 0, top: ratio * maxVerticalScroll(), behavior: "auto" });
-          }
-          reportProgress();
-        }, 60);
-      };
-
-      window.__INBOX_GO_PAGE = function(delta) {
-        if (mode !== "page") {
-          return;
-        }
-        var total = pageCount();
-        var next = pageIndex() + delta;
-        if (next < 0) {
-          postMessage({ type: "pageBoundary", direction: "prev" });
-          return;
-        }
-        if (next >= total) {
-          postMessage({ type: "pageBoundary", direction: "next" });
-          return;
-        }
-        window.scrollTo({ left: next * pageStep(), top: 0, behavior: "auto" });
-        setTimeout(reportProgress, 40);
-      };
-
-      window.__INBOX_REPORT_PROGRESS = reportProgress;
-      if (typeof window.__INBOX_SELECTION_ACTIVE__ === "undefined") {
-        window.__INBOX_SELECTION_ACTIVE__ = false;
-      }
-      var customSelectionMark = null;
-
-      function disableNativeSelection() {
-        document.documentElement.style.webkitUserSelect = "none";
-        document.documentElement.style.userSelect = "none";
-        document.documentElement.style.webkitTouchCallout = "none";
-        document.body.style.webkitUserSelect = "none";
-        document.body.style.userSelect = "none";
-        document.body.style.webkitTouchCallout = "none";
-      }
-
-      function clearNativeSelection() {
-        var selection = window.getSelection ? window.getSelection() : null;
-        if (selection && selection.removeAllRanges) {
-          selection.removeAllRanges();
-        }
-      }
-
-      function clearCustomSelection(silent) {
-        var marks = document.querySelectorAll(".inbox-custom-selection");
-        marks.forEach(function(mark) {
-          var parent = mark.parentNode;
-          if (!parent) {
-            return;
-          }
-          while (mark.firstChild) {
-            parent.insertBefore(mark.firstChild, mark);
-          }
-          parent.removeChild(mark);
-          parent.normalize();
-        });
-        customSelectionMark = null;
-        clearNativeSelection();
-        if (window.__INBOX_SELECTION_ACTIVE__) {
-          window.__INBOX_SELECTION_ACTIVE__ = false;
-          if (!silent) {
-            postMessage({ type: "selection-clear" });
-          }
-        }
-      }
-
-      function unwrapSavedAnnotations() {
-        var marks = document.querySelectorAll(".inbox-saved-annotation");
-        marks.forEach(function(mark) {
-          var parent = mark.parentNode;
-          if (!parent) {
-            return;
-          }
-          while (mark.firstChild) {
-            parent.insertBefore(mark.firstChild, mark);
-          }
-          parent.removeChild(mark);
-          parent.normalize();
-        });
-      }
-
-      function textRangeForOffset(start, end) {
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var total = 0;
-        var range = document.createRange();
-        var current = walker.nextNode();
-        var foundStart = false;
-
-        while (current) {
-          var nextTotal = total + current.nodeValue.length;
-          if (!foundStart && start >= total && start <= nextTotal) {
-            range.setStart(current, Math.max(0, start - total));
-            foundStart = true;
-          }
-          if (foundStart && end >= total && end <= nextTotal) {
-            range.setEnd(current, Math.max(0, end - total));
-            return range;
-          }
-          total = nextTotal;
-          current = walker.nextNode();
-        }
-
-        return null;
-      }
-
-      function markSavedAnnotation(annotation) {
-        var text = String(annotation.quote || annotation.selectedText || "").trim();
-        if (!text) {
-          return;
-        }
-
-        var fullText = document.body.textContent || "";
-        var start = Number.isFinite(annotation.offset) ? annotation.offset : -1;
-        if (start < 0 || fullText.slice(start, start + text.length) !== text) {
-          start = fullText.indexOf(text);
-        }
-        if (start < 0) {
-          return;
-        }
-
-        var range = textRangeForOffset(start, start + text.length);
-        if (!range) {
-          return;
-        }
-
-        var mark = document.createElement("span");
-        mark.className = "inbox-saved-annotation inbox-saved-" + annotation.type;
-        mark.setAttribute("data-annotation-id", annotation.id);
-        mark.setAttribute("data-annotation-type", annotation.type);
-        try {
-          range.surroundContents(mark);
-        } catch (error) {
-          var fragment = range.extractContents();
-          mark.appendChild(fragment);
-          range.insertNode(mark);
-        }
-      }
-
-      window.__INBOX_APPLY_ANNOTATIONS__ = function(annotations) {
-        unwrapSavedAnnotations();
-        (annotations || []).forEach(markSavedAnnotation);
-      };
-
-      function rangeFromPoint(x, y) {
-        if (document.caretRangeFromPoint) {
-          return document.caretRangeFromPoint(x, y);
-        }
-        if (document.caretPositionFromPoint) {
-          var position = document.caretPositionFromPoint(x, y);
-          if (!position) {
-            return null;
-          }
-          var range = document.createRange();
-          range.setStart(position.offsetNode, position.offset);
-          range.collapse(true);
-          return range;
-        }
-        return null;
-      }
-
-      function firstTextNode(node) {
-        if (!node) {
-          return null;
-        }
-        if (node.nodeType === Node.TEXT_NODE && node.nodeValue && node.nodeValue.trim()) {
-          return node;
-        }
-        var walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null);
-        var textNode = walker.nextNode();
-        while (textNode && !textNode.nodeValue.trim()) {
-          textNode = walker.nextNode();
-        }
-        return textNode;
-      }
-
-      function documentTextOffset(node, offset) {
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-        var total = 0;
-        var current = walker.nextNode();
-        while (current) {
-          if (current === node) {
-            return total + offset;
-          }
-          total += current.nodeValue.length;
-          current = walker.nextNode();
-        }
-        return Math.max(0, document.body.innerText.indexOf(node.nodeValue.slice(offset, offset + 12)));
-      }
-
-      function isCjk(char) {
-        return /[\\u3400-\\u9fff]/.test(char);
-      }
-
-      function isSentenceBoundary(char) {
-        return /[。！？!?；;\\n\\r]/.test(char);
-      }
-
-      function isWordBoundary(char) {
-        return /[\\s\\n\\r\\t,.;:!?，。！？；：、()\\[\\]{}"'“”‘’]/.test(char);
-      }
-
-      function selectionSlice(text, offset) {
-        if (!text || !text.trim()) {
-          return null;
-        }
-        var pivot = Math.max(0, Math.min(text.length - 1, offset));
-        if (/\\s/.test(text.charAt(pivot))) {
-          var nearby = pivot;
-          while (nearby < text.length && nearby - pivot < 8 && /\\s/.test(text.charAt(nearby))) {
-            nearby += 1;
-          }
-          if (nearby < text.length && !/\\s/.test(text.charAt(nearby))) {
-            pivot = nearby;
-          }
-        }
-
-        var start = pivot;
-        var end = pivot + 1;
-        if (isCjk(text.charAt(pivot))) {
-          while (start > 0 && !isSentenceBoundary(text.charAt(start - 1)) && pivot - start < 18) {
-            start -= 1;
-          }
-          while (end < text.length && !isSentenceBoundary(text.charAt(end)) && end - pivot < 24) {
-            end += 1;
-          }
-          if (end < text.length && isSentenceBoundary(text.charAt(end))) {
-            end += 1;
-          }
-        } else {
-          while (start > 0 && !isWordBoundary(text.charAt(start - 1))) {
-            start -= 1;
-          }
-          while (end < text.length && !isWordBoundary(text.charAt(end))) {
-            end += 1;
-          }
-        }
-
-        while (start < end && /\\s/.test(text.charAt(start))) {
-          start += 1;
-        }
-        while (end > start && /\\s/.test(text.charAt(end - 1))) {
-          end -= 1;
-        }
-
-        if (end <= start) {
-          return null;
-        }
-        return { start: start, end: end, text: text.slice(start, end) };
-      }
-
-      function createCustomSelection(point) {
-        clearCustomSelection(true);
-        var range = rangeFromPoint(point.clientX, point.clientY);
-        if (!range) {
-          postMessage({ type: "selection-empty" });
-          return false;
-        }
-
-        var textNode = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer : firstTextNode(range.startContainer);
-        if (!textNode || !textNode.nodeValue) {
-          postMessage({ type: "selection-empty" });
-          return false;
-        }
-
-        var slice = selectionSlice(textNode.nodeValue, range.startOffset);
-        if (!slice || !slice.text.trim()) {
-          postMessage({ type: "selection-empty" });
-          return false;
-        }
-
-        var markRange = document.createRange();
-        markRange.setStart(textNode, slice.start);
-        markRange.setEnd(textNode, slice.end);
-        var offset = documentTextOffset(textNode, slice.start);
-        var mark = document.createElement("span");
-        mark.className = "inbox-custom-selection";
-        mark.setAttribute("data-inbox-selection", "true");
-        try {
-          markRange.surroundContents(mark);
-        } catch (error) {
-          postMessage({ type: "selection-empty" });
-          return false;
-        }
-
-        customSelectionMark = mark;
-        window.__INBOX_SELECTION_ACTIVE__ = true;
-        var rect = mark.getBoundingClientRect();
-        postMessage({
-          type: "selection-menu",
-          selectedText: slice.text.trim(),
-          offset: offset,
-          x: rect ? rect.left + rect.width / 2 : point.clientX,
-          y: rect ? rect.bottom : point.clientY
-        });
-        return true;
-      }
-
-      function reportSelectionMenu() {
-        if (!customSelectionMark) {
-          postMessage({ type: "selection-empty" });
-          return;
-        }
-        var rect = customSelectionMark.getBoundingClientRect();
-        postMessage({
-          type: "selection-menu",
-          selectedText: customSelectionMark.innerText.trim(),
-          offset: document.body.innerText.indexOf(customSelectionMark.innerText.trim()),
-          x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
-          y: rect ? rect.bottom : 96
-        });
-      }
-
-      window.__INBOX_CLEAR_SELECTION = function() {
-        clearCustomSelection(true);
-      };
-
-      window.__INBOX_CAPTURE_SELECTION = function() {
-        reportSelectionMenu();
-      };
-
-      if (!window.__INBOX_SCRIPT_READY__) {
-        window.__INBOX_SCRIPT_READY__ = true;
-        var progressTimer = null;
-        var longPressTimer = null;
-        var longPressPoint = null;
-        var longPressActivated = false;
-        var lastTouchAt = 0;
-
-        function tapRatio(point) {
-          var screenWidth = window.screen && window.screen.width ? window.screen.width : 0;
-          if (point && Number.isFinite(point.screenX) && screenWidth > 0) {
-            return Math.min(1, Math.max(0, point.screenX / screenWidth));
-          }
-
-          return Math.min(1, Math.max(0, point.clientX / Math.max(1, window.innerWidth)));
-        }
-
-        function handleReaderTap(event, point) {
-          var target = event.target;
-          if (target && target.closest && target.closest("a")) {
-            return;
-          }
-          var annotationMark = target && target.closest && target.closest(".inbox-saved-annotation");
-          if (annotationMark) {
-            postMessage({
-              type: "annotation-open",
-              annotationId: annotationMark.getAttribute("data-annotation-id")
-            });
-            return;
-          }
-          if (window.__INBOX_SELECTION_ACTIVE__) {
-            clearCustomSelection(false);
-            return;
-          }
-          postMessage({ type: "selection-clear" });
-          if (window.__INBOX_PANEL_ACTIVE__) {
-            postMessage({ type: "dismissPanel" });
-            return;
-          }
-          if (window.__INBOX_UI_ACTIVE__) {
-            postMessage({ type: "dismissChrome" });
-            return;
-          }
-          if (mode === "page") {
-            var ratio = tapRatio(point);
-            if (ratio < 0.28) {
-              window.__INBOX_GO_PAGE(-1);
-              return;
-            }
-            if (ratio > 0.72) {
-              window.__INBOX_GO_PAGE(1);
-              return;
-            }
-          }
-          postMessage({ type: "toggleChrome" });
-        }
-
-        function cancelLongPress() {
-          if (longPressTimer) {
-            clearTimeout(longPressTimer);
-          }
-          longPressTimer = null;
-          longPressPoint = null;
-        }
-
-        document.addEventListener("touchstart", function(event) {
-          var touch = event.touches && event.touches[0];
-          if (!touch || (event.target && event.target.closest && event.target.closest("a"))) {
-            return;
-          }
-          cancelLongPress();
-          longPressActivated = false;
-          longPressPoint = {
-            clientX: touch.clientX,
-            clientY: touch.clientY,
-            screenX: touch.screenX
-          };
-          longPressTimer = setTimeout(function() {
-            if (!longPressPoint) {
-              return;
-            }
-            longPressActivated = createCustomSelection(longPressPoint);
-            if (longPressActivated) {
-              lastTouchAt = Date.now();
-            }
-          }, 420);
-        }, { passive: true, capture: true });
-
-        document.addEventListener("touchmove", function(event) {
-          var touch = event.touches && event.touches[0];
-          if (!touch || !longPressPoint) {
-            return;
-          }
-          if (Math.abs(touch.clientX - longPressPoint.clientX) > 16 || Math.abs(touch.clientY - longPressPoint.clientY) > 16) {
-            cancelLongPress();
-          }
-        }, { passive: true, capture: true });
-
-        document.addEventListener("touchend", function(event) {
-          var touch = event.changedTouches && event.changedTouches[0];
-          if (!touch) {
-            return;
-          }
-          cancelLongPress();
-          if (longPressActivated) {
-            event.preventDefault();
-            event.stopPropagation();
-            longPressActivated = false;
-            return;
-          }
-          lastTouchAt = Date.now();
-          handleReaderTap(event, touch);
-        }, { passive: false, capture: true });
-
-        document.addEventListener("click", function(event) {
-          if (Date.now() - lastTouchAt < 450) {
-            return;
-          }
-          handleReaderTap(event, event);
-        });
-        document.addEventListener("contextmenu", function(event) {
-          event.preventDefault();
-          clearNativeSelection();
-          createCustomSelection(event);
-        });
-        window.addEventListener("scroll", function() {
-          if (window.__INBOX_SELECTION_ACTIVE__) {
-            clearCustomSelection(false);
-          }
-          if (progressTimer) {
-            clearTimeout(progressTimer);
-          }
-          progressTimer = setTimeout(reportProgress, 80);
-        }, { passive: true });
-        window.addEventListener("resize", function() {
-          var ratio = mode === "page" ? (pageCount() <= 1 ? 0 : pageIndex() / Math.max(1, pageCount() - 1)) : window.scrollY / maxVerticalScroll();
-          applyMode();
-          setTimeout(function() {
-            if (mode === "page") {
-              window.scrollTo({ left: Math.round(ratio * Math.max(1, pageCount() - 1)) * pageStep(), top: 0, behavior: "auto" });
-            } else {
-              window.scrollTo({ left: 0, top: ratio * maxVerticalScroll(), behavior: "auto" });
-            }
-            reportProgress();
-          }, 80);
-        });
-        window.addEventListener("load", function() {
-          applyMode();
-          setTimeout(function() {
-            restorePosition();
-            reportProgress();
-          }, 80);
-        }, { once: true });
-      }
-
-      function restorePosition() {
-        if (mode === "page") {
-          var targetPage = Math.round(restoreRatio * Math.max(1, pageCount() - 1));
-          window.scrollTo({ left: targetPage * pageStep(), top: 0, behavior: "auto" });
-        } else {
-          window.scrollTo({ left: 0, top: restoreRatio * maxVerticalScroll(), behavior: "auto" });
-        }
-      }
-
-      applyMode();
-      restorePosition();
-      setTimeout(function() {
-        restorePosition();
-        reportProgress();
-      }, 80);
-    })();
-    true;
-  `;
-}
-
-function initialReaderLayoutScript(preferences: ReaderPreferences, restoreRatio: number, readerInsets: ReaderInsets, preserveLayout: boolean) {
-  const theme = brand.readerThemes[preferences.readerTheme];
-  const fontStack = readerFontCssStack(preferences.fontFamily);
-  const initialInsets = {
-    top: Math.max(32, Math.round(readerInsets.top)),
-    bottom: Math.max(48, Math.round(readerInsets.bottom)),
-  };
-  return `
-    (function() {
-      var preserveLayout = ${preserveLayout ? 'true' : 'false'};
-      var mode = "${preferences.readingMode}";
-      var margin = ${preferences.margin};
-      var restoreRatio = ${restoreRatio};
-      var initialInsets = ${JSON.stringify(initialInsets)};
-      function pageStep() {
-        return Math.max(1, window.innerWidth);
-      }
-      function pageCount() {
-        return Math.max(1, Math.round(Math.max(0, document.documentElement.scrollWidth - window.innerWidth) / pageStep()) + 1);
-      }
-      function syncPreservedPageMargins(active) {
-        var id = "inbox-preserved-page-margins";
-        var existing = document.getElementById(id);
-        if (!active) {
-          document.documentElement.classList.remove("inbox-reader-page");
-          if (existing) existing.remove();
-          return;
-        }
-
-        document.documentElement.classList.add("inbox-reader-page");
-        var style = existing || document.createElement("style");
-        style.id = id;
-        style.textContent =
-          "html.inbox-reader-page body > :not(script):not(style) {" +
-          "box-sizing: border-box;" +
-          "padding-left: " + margin + "px;" +
-          "padding-right: " + margin + "px;" +
-          "-webkit-box-decoration-break: clone;" +
-          "box-decoration-break: clone;" +
-          "}";
-        if (!existing && document.head) document.head.appendChild(style);
-      }
-      function applyInitialLayout() {
-        document.documentElement.style.background = "${theme.background}";
-        document.documentElement.style.setProperty("--reader-font-size", "${preferences.fontSize}px");
-        document.documentElement.style.setProperty("--reader-line-height", "${preferences.lineHeight}");
-        document.documentElement.style.setProperty("--reader-font-family", ${JSON.stringify(fontStack)});
-        document.documentElement.style.setProperty("--reader-bg", "${theme.background}");
-        document.documentElement.style.setProperty("--reader-text", "${theme.text}");
-        if (!document.body) {
-          return;
-        }
-        syncPreservedPageMargins(preserveLayout && mode === "page");
-        if (preserveLayout) {
-          if (mode === "page") {
-            document.documentElement.style.height = "100%";
-            document.documentElement.style.overflowX = "hidden";
-            document.documentElement.style.overflowY = "hidden";
-            document.body.style.boxSizing = "border-box";
-            document.body.style.width = "100vw";
-            document.body.style.maxWidth = "none";
-            document.body.style.minHeight = "100vh";
-            document.body.style.height = "100vh";
-            document.body.style.marginLeft = "0";
-            document.body.style.marginRight = "0";
-            document.body.style.paddingLeft = "0";
-            document.body.style.paddingRight = "0";
-            document.body.style.overflow = "visible";
-            document.body.style.columnWidth = window.innerWidth + "px";
-            document.body.style.columnGap = "0";
-            document.body.style.columnFill = "auto";
-            document.body.style.webkitColumnWidth = window.innerWidth + "px";
-            document.body.style.webkitColumnGap = "0";
-            document.body.style.webkitColumnFill = "auto";
-            window.scrollTo(Math.round(restoreRatio * Math.max(1, pageCount() - 1)) * pageStep(), 0);
-            return;
-          }
-          window.scrollTo(0, restoreRatio * Math.max(1, document.documentElement.scrollHeight - window.innerHeight));
-          return;
-        }
-        document.body.style.background = "${theme.background}";
-        document.body.style.color = "${theme.text}";
-        document.body.style.fontSize = "${preferences.fontSize}px";
-        document.body.style.lineHeight = "${preferences.lineHeight}";
-        document.body.style.boxSizing = "border-box";
-        document.body.style.paddingLeft = margin + "px";
-        document.body.style.paddingRight = margin + "px";
-        document.body.style.paddingTop = initialInsets.top + "px";
-        document.body.style.paddingBottom = initialInsets.bottom + "px";
-        if (mode === "page") {
-          document.documentElement.style.height = "100%";
-          document.documentElement.style.overflowX = "hidden";
-          document.documentElement.style.overflowY = "hidden";
-          document.body.style.width = "100vw";
-          document.body.style.maxWidth = "none";
-          document.body.style.minHeight = "100vh";
-          document.body.style.height = "100vh";
-          document.body.style.marginLeft = "0";
-          document.body.style.marginRight = "0";
-          document.body.style.paddingLeft = "0";
-          document.body.style.paddingRight = "0";
-          document.body.style.overflow = "visible";
-          document.body.style.columnWidth = window.innerWidth + "px";
-          document.body.style.columnGap = "0";
-          document.body.style.columnFill = "auto";
-          document.body.style.webkitColumnWidth = window.innerWidth + "px";
-          document.body.style.webkitColumnGap = "0";
-          document.body.style.webkitColumnFill = "auto";
-          window.scrollTo(Math.round(restoreRatio * Math.max(1, pageCount() - 1)) * pageStep(), 0);
-          return;
-        }
-        window.scrollTo(0, restoreRatio * Math.max(1, document.documentElement.scrollHeight - window.innerHeight));
-      }
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", applyInitialLayout, { once: true });
-      } else {
-        applyInitialLayout();
-      }
-    })();
-    true;
-  `;
 }
 
 function SearchExcerpt({ text, query }: { text: string; query: string }) {
@@ -1344,11 +417,14 @@ export default function ReaderScreen() {
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const webViewRef = useRef<WebView>(null);
+  const nativeReaderRef = useRef<InboxReaderViewRef | null>(null);
   const lastProgressSave = useRef(0);
   const latestProgressRatio = useRef(0);
+  const latestReadiumLocator = useRef<string | null>(null);
+  const pendingReadiumNavigation = useRef<PendingReadiumNavigation | null>(null);
   const [book, setBook] = useState<Book | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [chapterCache, setChapterCache] = useState<Record<string, Chapter>>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [restoreRatio, setRestoreRatio] = useState(0);
   const [preferences, setPreferences] = useState<ReaderPreferences>({
@@ -1374,7 +450,9 @@ export default function ReaderScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [pageStatus, setPageStatus] = useState({ pageIndex: 1, pageCount: 1 });
 
-  const currentChapter = chapters[currentIndex];
+  const currentChapterMeta = chapters[currentIndex];
+  const currentChapter = currentChapterMeta ? chapterCache[currentChapterMeta.id] : undefined;
+  const useNativeReadium = canUseReadium(book);
   const themeToken = brand.readerThemes[preferences.readerTheme];
   const readerTheme = themeToken;
   const chromePanelSurface = preferences.readerTheme === 'night' ? '#171A18' : brand.chrome.surface;
@@ -1408,8 +486,8 @@ export default function ReaderScreen() {
   };
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentBookmark = useMemo(
-    () => annotations.find((annotation) => annotation.type === 'bookmark' && annotation.chapterId === currentChapter?.id),
-    [annotations, currentChapter?.id]
+    () => annotations.find((annotation) => annotation.type === 'bookmark' && annotation.chapterId === currentChapterMeta?.id),
+    [annotations, currentChapterMeta?.id]
   );
   const chapterTitleById = useMemo(() => {
     return new Map(chapters.map((chapter) => [chapter.id, chapter.title]));
@@ -1421,27 +499,25 @@ export default function ReaderScreen() {
 
     return annotations.filter((annotation) => annotation.type === annotationFilter);
   }, [annotationFilter, annotations]);
-  const readerAnnotationMarks = useMemo<ReaderAnnotationMark[]>(() => {
-    if (!currentChapter) {
+  const readiumDecorations = useMemo<InboxReaderDecoration[]>(() => {
+    if (!useNativeReadium) {
       return [];
     }
 
     return annotations.flatMap((annotation) => {
-      if (annotation.chapterId !== currentChapter.id || !annotation.selectedText || (annotation.type !== 'highlight' && annotation.type !== 'note')) {
+      if ((annotation.type !== 'highlight' && annotation.type !== 'note') || !annotation.selectedText) {
         return [];
       }
-      const position = parseAnnotationPosition(annotation.position);
-      return [
-        {
-          id: annotation.id,
-          type: annotation.type,
-          selectedText: annotation.selectedText,
-          quote: position.quote ?? annotation.selectedText,
-          offset: typeof position.offset === 'number' ? position.offset : undefined,
-        },
-      ];
+
+      const fallbackChapter = annotation.chapterId === currentChapter?.id ? currentChapter : undefined;
+      const locator = readiumLocatorForAnnotation(annotation, fallbackChapter);
+      if (!locator) {
+        return [];
+      }
+
+      return [{ id: annotation.id, locator, type: annotation.type }];
     });
-  }, [annotations, currentChapter]);
+  }, [annotations, currentChapter, useNativeReadium]);
   const annotationCounts = useMemo(() => {
     return annotations.reduce(
       (counts, annotation) => {
@@ -1455,13 +531,6 @@ export default function ReaderScreen() {
   const chromeTopOffset = Math.max(24, insets.top + 12);
   const chromeBottomOffset = Math.max(16, insets.bottom + 12);
   const bottomDockVisible = chromeVisible && panel === null;
-  const readerInsets = useMemo(
-    () => ({
-      top: Math.max(42, Math.ceil(insets.top + 12)),
-      bottom: Math.max(56, Math.ceil(insets.bottom + 28)),
-    }),
-    [insets.bottom, insets.top]
-  );
   const panelHeight = panel
     ? Math.min(windowHeight * (panel === 'search' ? 0.62 : 0.74), windowHeight - chromeTopOffset - 32)
     : undefined;
@@ -1471,9 +540,17 @@ export default function ReaderScreen() {
     }
 
     const menuWidth = 248;
+    const menuHeight = 48;
+    const margin = 12;
+    const topLimit = insets.top + 88;
+    const bottomLimit = windowHeight - chromeBottomOffset - menuHeight - margin;
+    const selectionHalfHeight = (textSelection.height ?? 0) / 2;
+    const belowSelection = textSelection.y + selectionHalfHeight + margin;
+    const aboveSelection = textSelection.y - selectionHalfHeight - menuHeight - margin;
+    const top = aboveSelection >= topLimit ? aboveSelection : belowSelection;
     return {
       left: Math.min(windowWidth - menuWidth - 12, Math.max(12, textSelection.x - menuWidth / 2)),
-      top: Math.min(windowHeight - chromeBottomOffset - 72, Math.max(insets.top + 88, textSelection.y + 20)),
+      top: Math.min(bottomLimit, Math.max(topLimit, top)),
       width: menuWidth,
     };
   }, [chromeBottomOffset, insets.top, textSelection, windowHeight, windowWidth]);
@@ -1504,11 +581,14 @@ export default function ReaderScreen() {
     const nextAnnotations = await listAnnotations(db, id);
 
     const progressIndex = nextChapters.findIndex((chapter) => chapter.id === progress?.chapter_id);
+    const nextIndex = progressIndex >= 0 ? progressIndex : 0;
+    const initialChapter = nextChapters[nextIndex] ? await getChapter(db, id, nextChapters[nextIndex].id) : null;
     setBook(nextBook);
     setChapters(nextChapters);
+    setChapterCache(initialChapter ? { [initialChapter.id]: initialChapter } : {});
     setPreferences(nextPreferences);
     setAnnotations(nextAnnotations);
-    setCurrentIndex(progressIndex >= 0 ? progressIndex : 0);
+    setCurrentIndex(nextIndex);
     setRestoreRatio(progress?.scroll_ratio ?? 0);
     latestProgressRatio.current = progress?.scroll_ratio ?? 0;
     setLoading(false);
@@ -1526,6 +606,58 @@ export default function ReaderScreen() {
   }, [loadReader]);
 
   useEffect(() => {
+    if (!book || !currentChapterMeta || currentChapter) {
+      return;
+    }
+
+    let cancelled = false;
+    getChapter(db, book.id, currentChapterMeta.id)
+      .then((chapter) => {
+        if (!cancelled && chapter) {
+          setChapterCache((cache) => ({ ...cache, [chapter.id]: chapter }));
+        }
+      })
+      .catch(() => showNotice('章节加载失败，请重试'));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [book, currentChapter, currentChapterMeta, db, showNotice]);
+
+  useEffect(() => {
+    if (!book) {
+      return;
+    }
+
+    const ids = [chapters[currentIndex - 1]?.id, chapters[currentIndex + 1]?.id].filter((chapterId): chapterId is string => Boolean(chapterId && !chapterCache[chapterId]));
+    if (!ids.length) {
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(ids.map((chapterId) => getChapter(db, book.id, chapterId)))
+      .then((loadedChapters) => {
+        if (cancelled) {
+          return;
+        }
+        setChapterCache((cache) => {
+          const next = { ...cache };
+          for (const chapter of loadedChapters) {
+            if (chapter) {
+              next[chapter.id] = chapter;
+            }
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [book, chapterCache, chapters, currentIndex, db]);
+
+  useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
     const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
     return () => {
@@ -1537,12 +669,12 @@ export default function ReaderScreen() {
   }, []);
 
   const flushProgress = useCallback(() => {
-    if (!book || !currentChapter) {
+    if (!book || !currentChapterMeta) {
       return;
     }
 
-    void saveProgress(db, book.id, currentChapter.id, latestProgressRatio.current);
-  }, [book, currentChapter, db]);
+    void saveProgress(db, book.id, currentChapterMeta.id, latestProgressRatio.current);
+  }, [book, currentChapterMeta, db]);
 
   const handleReaderBack = useCallback(() => {
     flushProgress();
@@ -1590,58 +722,221 @@ export default function ReaderScreen() {
     };
   }, [book, db, searchQuery]);
 
-  const commitProgress = useCallback(
-    async (ratio: number, force = false) => {
-      if (!book || !currentChapter) {
-        return;
-      }
+  const clearPendingReadiumNavigation = useCallback(() => {
+    const pending = pendingReadiumNavigation.current;
+    if (pending) {
+      clearTimeout(pending.timeout);
+      pendingReadiumNavigation.current = null;
+    }
+  }, []);
 
-      const now = Date.now();
-      if (!force && now - lastProgressSave.current < 1200) {
-        return;
-      }
-
-      const nextRatio = Math.max(0, Math.min(1, ratio));
-      latestProgressRatio.current = nextRatio;
-      lastProgressSave.current = now;
-      await saveProgress(db, book.id, currentChapter.id, nextRatio);
-    },
-    [book, currentChapter, db]
-  );
+  useEffect(() => clearPendingReadiumNavigation, [clearPendingReadiumNavigation]);
 
   const goToChapter = useCallback(
-    (index: number, ratio = 0) => {
+    async (index: number, ratio = 0) => {
       if (!book || !chapters[index]) {
         return;
       }
+      const nextChapter = chapters[index];
+      const targetRatio = clampRatio(ratio);
+      if (useNativeReadium) {
+        clearPendingReadiumNavigation();
+        const token = Date.now();
+        const timeout = setTimeout(() => {
+          if (pendingReadiumNavigation.current?.token === token) {
+            pendingReadiumNavigation.current = null;
+            showNotice('章节跳转失败');
+          }
+        }, 2200);
+        pendingReadiumNavigation.current = { index, ratio: targetRatio, token, timeout };
+        const jumped = Boolean(await nativeReaderRef.current?.goToReadingOrder(index, targetRatio, false).catch(() => false));
+        if (!jumped) {
+          clearPendingReadiumNavigation();
+          showNotice('章节跳转失败');
+          return;
+        }
+        clearPendingReadiumNavigation();
+        setCurrentIndex(index);
+        setRestoreRatio(targetRatio);
+        setPageStatus({ pageIndex: 1, pageCount: 1 });
+        setPanel(null);
+        setTextSelection(null);
+        setNoteSelection(null);
+        latestProgressRatio.current = targetRatio;
+        void saveProgress(db, book.id, nextChapter.id, targetRatio);
+        return;
+      }
       setCurrentIndex(index);
-      setRestoreRatio(ratio);
+      setRestoreRatio(targetRatio);
       setPageStatus({ pageIndex: 1, pageCount: 1 });
       setPanel(null);
       setTextSelection(null);
       setNoteSelection(null);
-      latestProgressRatio.current = ratio;
-      void saveProgress(db, book.id, chapters[index].id, ratio);
+      latestProgressRatio.current = targetRatio;
+      void saveProgress(db, book.id, nextChapter.id, targetRatio);
     },
-    [book, chapters, db]
+    [book, chapters, clearPendingReadiumNavigation, db, showNotice, useNativeReadium]
+  );
+
+  const handleReadiumLocationChange = useCallback(
+    (event: { nativeEvent: InboxReaderLocationEvent }) => {
+      if (!book) {
+        return;
+      }
+
+      const href = readiumHrefFromLocator(event.nativeEvent.locator);
+      latestReadiumLocator.current = event.nativeEvent.locator;
+      const nextIndex = chapters.findIndex((chapter) => readiumHrefMatchesChapter(chapter, href));
+      if (nextIndex < 0) {
+        return;
+      }
+
+      const ratio = clampRatio(event.nativeEvent.progression ?? 0);
+      const pending = pendingReadiumNavigation.current;
+      if (pending?.index === nextIndex) {
+        clearPendingReadiumNavigation();
+        setRestoreRatio(pending.ratio);
+        setPageStatus({ pageIndex: 1, pageCount: 1 });
+        setPanel(null);
+        setTextSelection(null);
+        setNoteSelection(null);
+      }
+      latestProgressRatio.current = ratio;
+      if (nextIndex !== currentIndex) {
+        setCurrentIndex(nextIndex);
+      }
+
+      const now = Date.now();
+      if (now - lastProgressSave.current < 1200) {
+        return;
+      }
+      lastProgressSave.current = now;
+      void saveProgress(db, book.id, chapters[nextIndex].id, ratio);
+    },
+    [book, chapters, clearPendingReadiumNavigation, currentIndex, db]
+  );
+
+  const handleReadiumTap = useCallback(
+    (event: { nativeEvent: InboxReaderTapEvent }) => {
+      if (chromeVisible || panel || textSelection || noteSelection) {
+        closePanel();
+        setChromeVisible(false);
+        return;
+      }
+      if (event.nativeEvent.zone === 'left') {
+        void nativeReaderRef.current?.goBackward(true);
+        return;
+      }
+      if (event.nativeEvent.zone === 'right') {
+        void nativeReaderRef.current?.goForward(true);
+        return;
+      }
+      setChromeVisible((visible) => !visible);
+    },
+    [chromeVisible, closePanel, noteSelection, panel, textSelection]
+  );
+
+  const handleReadiumDecorationPress = useCallback(
+    (event: { nativeEvent: InboxReaderDecorationPressEvent }) => {
+      const annotation = annotations.find((item) => item.id === event.nativeEvent.id);
+      if (!annotation) {
+        return;
+      }
+
+      setTextSelection(null);
+      setNoteSelection(null);
+      setAnnotationFilter(annotation.type === 'note' ? 'note' : annotation.type === 'highlight' ? 'highlight' : 'all');
+      setPanel('notes');
+      setChromeVisible(true);
+    },
+    [annotations]
+  );
+
+  const handleReadiumExternalLink = useCallback(
+    async (event: { nativeEvent: InboxReaderExternalLinkEvent }) => {
+      const url = event.nativeEvent.url;
+      if (!url) {
+        return;
+      }
+
+      try {
+        await Linking.openURL(url);
+      } catch {
+        showNotice('外部链接打开失败');
+      }
+    },
+    [showNotice]
+  );
+
+  const handleReadiumSelectionChange = useCallback(
+    (event: { nativeEvent: Partial<InboxReaderSelection> }) => {
+      const selection = event.nativeEvent;
+      const selectedText = selection.selectedText?.trim();
+      if (!selection.locator || !selectedText) {
+        setTextSelection(null);
+        return;
+      }
+
+      Keyboard.dismiss();
+      setPanel(null);
+      setChromeVisible(false);
+      setTextSelection({
+        selectedText,
+        offset: 0,
+        x: typeof selection.x === 'number' ? selection.x : windowWidth / 2,
+        y: typeof selection.y === 'number' ? selection.y : windowHeight / 2,
+        height: typeof selection.height === 'number' ? selection.height : undefined,
+        locator: selection.locator,
+      });
+    },
+    [windowHeight, windowWidth]
   );
 
   const goToSearchResult = useCallback(
-    (result: SearchResult) => {
+    async (result: SearchResult) => {
       const chapterIndex = chapters.findIndex((chapter) => chapter.id === result.chapterId);
       if (chapterIndex < 0) {
         showNotice('没有找到匹配章节');
         return;
       }
 
+      if (book && useNativeReadium) {
+        const loadedChapter = chapterCache[result.chapterId] ?? (await getChapter(db, book.id, result.chapterId));
+        if (!loadedChapter) {
+          showNotice('命中章节加载失败');
+          return;
+        }
+
+        if (!chapterCache[result.chapterId]) {
+          setChapterCache((cache) => ({ ...cache, [loadedChapter.id]: loadedChapter }));
+        }
+
+        const ratio = ratioFromOffset(loadedChapter, result.matchOffset);
+        const queryText = searchQuery.trim();
+        const highlight = queryText ? loadedChapter.textContent.slice(result.matchOffset, result.matchOffset + queryText.length) : undefined;
+        const locator = readiumLocatorForOffset(loadedChapter, result.matchOffset, highlight);
+        setCurrentIndex(chapterIndex);
+        setRestoreRatio(ratio);
+        setPageStatus({ pageIndex: 1, pageCount: 1 });
+        setPanel(null);
+        setTextSelection(null);
+        setNoteSelection(null);
+        latestProgressRatio.current = ratio;
+        latestReadiumLocator.current = locator;
+        await nativeReaderRef.current?.goToLocator(locator, true).catch(() => showNotice('搜索跳转失败'));
+        await saveProgress(db, book.id, loadedChapter.id, ratio);
+        showNotice('已跳到命中位置');
+        return;
+      }
+
       goToChapter(chapterIndex, ratioFromOffset(chapters[chapterIndex], result.matchOffset));
       showNotice('已跳到命中位置');
     },
-    [chapters, goToChapter, showNotice]
+    [book, chapterCache, chapters, db, goToChapter, searchQuery, showNotice, useNativeReadium]
   );
 
   const goToAnnotation = useCallback(
-    (annotation: Annotation) => {
+    async (annotation: Annotation) => {
       const chapterIndex = chapters.findIndex((chapter) => chapter.id === annotation.chapterId);
       if (chapterIndex < 0) {
         showNotice('没有找到标注所在章节');
@@ -1649,19 +944,113 @@ export default function ReaderScreen() {
       }
 
       const position = parseAnnotationPosition(annotation.position);
+      if (book && useNativeReadium) {
+        const loadedChapter = chapterCache[annotation.chapterId] ?? (await getChapter(db, book.id, annotation.chapterId));
+        const locator = loadedChapter ? readiumLocatorForAnnotation(annotation, loadedChapter) ?? position.locator : position.locator;
+        if (!locator) {
+          showNotice('标注位置已失效');
+          return;
+        }
+
+        if (loadedChapter && !chapterCache[annotation.chapterId]) {
+          setChapterCache((cache) => ({ ...cache, [loadedChapter.id]: loadedChapter }));
+        }
+
+        const target = chapterFromReadiumLocator(chapters, locator);
+        const ratio = clampRatio(parseReadiumLocator(locator)?.locations?.progression ?? (loadedChapter ? ratioFromOffset(loadedChapter, position.offset) : 0));
+        if (target) {
+          setCurrentIndex(target.index);
+        }
+        setPanel(null);
+        setTextSelection(null);
+        setNoteSelection(null);
+        latestProgressRatio.current = ratio;
+        latestReadiumLocator.current = locator;
+        await nativeReaderRef.current?.goToLocator(locator, true).catch(() => showNotice('标注跳转失败'));
+        if (target && book) {
+          await saveProgress(db, book.id, target.chapter.id, ratio);
+        }
+        showNotice(`已跳到${annotationLabels[annotation.type]}`);
+        return;
+      }
+
       goToChapter(chapterIndex, ratioFromOffset(chapters[chapterIndex], position.offset));
       showNotice(`已跳到${annotationLabels[annotation.type]}`);
     },
-    [chapters, goToChapter, showNotice]
+    [book, chapterCache, chapters, db, goToChapter, showNotice, useNativeReadium]
   );
 
-  const clearWebSelection = useCallback(() => {
-    webViewRef.current?.injectJavaScript(`
-      window.__INBOX_CLEAR_SELECTION && window.__INBOX_CLEAR_SELECTION();
-      window.getSelection && window.getSelection().removeAllRanges();
-      true;
-    `);
-  }, []);
+  const readCurrentReadiumSelection = useCallback(async () => {
+    let selection: InboxReaderSelection | null | undefined;
+    const getCurrentSelection = nativeReaderRef.current?.getCurrentSelection;
+    if (typeof getCurrentSelection !== 'function') {
+      showNotice('重新打开阅读器后再试');
+      return null;
+    }
+
+    try {
+      selection = await getCurrentSelection();
+    } catch {
+      selection = null;
+    }
+
+    const selectedText = selection?.selectedText?.trim();
+    if (!selection?.locator || !selectedText) {
+      showNotice('先选中正文中的文字');
+      return null;
+    }
+
+    return {
+      selectedText,
+      offset: 0,
+      x: typeof selection.x === 'number' ? selection.x : windowWidth / 2,
+      y: typeof selection.y === 'number' ? selection.y : windowHeight / 2,
+      locator: selection.locator,
+    };
+  }, [showNotice, windowHeight, windowWidth]);
+
+  const saveReadiumSelectionHighlight = useCallback(async () => {
+    if (!book) {
+      return;
+    }
+
+    const selection = await readCurrentReadiumSelection();
+    if (!selection?.locator) {
+      return;
+    }
+
+    const target = chapterFromReadiumLocator(chapters, selection.locator);
+    const targetChapter = target?.chapter ?? currentChapterMeta;
+    if (!targetChapter) {
+      showNotice('没有找到选区章节');
+      return;
+    }
+
+    await createAnnotation(db, {
+      bookId: book.id,
+      chapterId: targetChapter.id,
+      type: 'highlight',
+      selectedText: selection.selectedText,
+      color: '#f6d46a',
+      position: JSON.stringify({ locator: selection.locator, quote: selection.selectedText.slice(0, 140) }),
+    });
+    await nativeReaderRef.current?.clearSelection?.();
+    setAnnotations(await listAnnotations(db, book.id));
+    showNotice('已保存划线');
+  }, [book, chapters, currentChapterMeta, db, readCurrentReadiumSelection, showNotice]);
+
+  const startReadiumSelectionNote = useCallback(async () => {
+    const selection = await readCurrentReadiumSelection();
+    if (!selection) {
+      return;
+    }
+
+    setNoteSelection(selection);
+    setNoteDraft('');
+    await nativeReaderRef.current?.clearSelection?.();
+    setPanel('notes');
+    setChromeVisible(true);
+  }, [readCurrentReadiumSelection]);
 
   const copySelectedText = useCallback(async () => {
     if (!textSelection) {
@@ -1670,31 +1059,34 @@ export default function ReaderScreen() {
 
     const copied = await Clipboard.setStringAsync(textSelection.selectedText);
     setTextSelection(null);
-    clearWebSelection();
+    await nativeReaderRef.current?.clearSelection?.();
     showNotice(copied ? '已复制' : '复制失败，请重试');
-  }, [clearWebSelection, showNotice, textSelection]);
+  }, [showNotice, textSelection]);
 
   const saveSelectedHighlight = useCallback(async () => {
-    if (!book || !currentChapter || !textSelection) {
+    if (!book || !currentChapterMeta || !textSelection) {
       return;
     }
 
     const selection = textSelection;
     setTextSelection(null);
-    clearWebSelection();
+    await nativeReaderRef.current?.clearSelection?.();
+    const targetChapter = selection.locator
+      ? chapterFromReadiumLocator(chapters, selection.locator)?.chapter ?? currentChapterMeta
+      : currentChapterMeta;
     await createAnnotation(db, {
       bookId: book.id,
-      chapterId: currentChapter.id,
+      chapterId: targetChapter.id,
       type: 'highlight',
       selectedText: selection.selectedText,
       color: '#f6d46a',
-      position: JSON.stringify({ offset: selection.offset, quote: selection.selectedText.slice(0, 140) }),
+      position: JSON.stringify({ offset: selection.offset, locator: selection.locator, quote: selection.selectedText.slice(0, 140) }),
     });
     setAnnotations(await listAnnotations(db, book.id));
     showNotice('已保存划线');
-  }, [book, clearWebSelection, currentChapter, db, showNotice, textSelection]);
+  }, [book, chapters, currentChapterMeta, db, showNotice, textSelection]);
 
-  const startSelectionNote = useCallback(() => {
+  const startSelectionNote = useCallback(async () => {
     if (!textSelection) {
       return;
     }
@@ -1702,174 +1094,34 @@ export default function ReaderScreen() {
     setNoteSelection(textSelection);
     setNoteDraft('');
     setTextSelection(null);
-    clearWebSelection();
+    await nativeReaderRef.current?.clearSelection?.();
     setPanel('notes');
     setChromeVisible(true);
-  }, [clearWebSelection, textSelection]);
+  }, [textSelection]);
 
-  const handleWebMessage = useCallback(
-    async (event: WebViewMessageEvent) => {
-      let payload: {
-        type?: string;
-        annotationId?: string;
-        ratio?: number;
-        selectedText?: string;
-        offset?: number;
-        x?: number;
-        y?: number;
-        pageIndex?: number;
-        pageCount?: number;
-        direction?: 'prev' | 'next';
-      };
-      try {
-        payload = JSON.parse(event.nativeEvent.data);
-      } catch {
-        return;
-      }
-
-      if (payload.type === 'toggleChrome') {
-        setChromeVisible((visible) => !visible);
-      }
-
-      if (payload.type === 'dismissChrome') {
-        Keyboard.dismiss();
-        setPanel(null);
-        setTextSelection(null);
-        setNoteSelection(null);
-        setChromeVisible(false);
-      }
-
-      if (payload.type === 'dismissPanel') {
-        Keyboard.dismiss();
-        setPanel(null);
-        setTextSelection(null);
-        setNoteSelection(null);
-        setChromeVisible(true);
-      }
-
-      if (payload.type === 'progress' && typeof payload.ratio === 'number') {
-        latestProgressRatio.current = Math.max(0, Math.min(1, payload.ratio));
-        if (preferences.readingMode === 'page' && (typeof payload.pageIndex !== 'number' || typeof payload.pageCount !== 'number')) {
-          return;
-        }
-        if (typeof payload.pageIndex === 'number' && typeof payload.pageCount === 'number') {
-          setPageStatus({
-            pageIndex: Math.max(1, payload.pageIndex),
-            pageCount: Math.max(1, payload.pageCount),
-          });
-        }
-        commitProgress(payload.ratio);
-      }
-
-      if (payload.type === 'pageBoundary' && payload.direction === 'prev') {
-        if (currentIndex > 0) {
-          goToChapter(currentIndex - 1, 1);
-          return;
-        }
-        showNotice('已经是第一章');
-      }
-
-      if (payload.type === 'pageBoundary' && payload.direction === 'next') {
-        if (currentIndex < chapters.length - 1) {
-          goToChapter(currentIndex + 1, 0);
-          return;
-        }
-        showNotice('已经读到最后一章');
-      }
-
-      if (payload.type === 'selection-empty') {
-        showNotice('先选择正文中的文字，再点划线');
-      }
-
-      if (payload.type === 'selection-clear') {
-        setTextSelection(null);
-      }
-
-      if (payload.type === 'annotation-open' && payload.annotationId) {
-        const annotation = annotations.find((item) => item.id === payload.annotationId);
-        setTextSelection(null);
-        setNoteSelection(null);
-        setAnnotationFilter(annotation?.type === 'note' ? 'note' : annotation?.type === 'highlight' ? 'highlight' : 'all');
-        setPanel('notes');
-        setChromeVisible(true);
-      }
-
-      if ((payload.type === 'selection-menu' || payload.type === 'selection') && payload.selectedText) {
-        Keyboard.dismiss();
-        setPanel(null);
-        setChromeVisible(false);
-        setTextSelection({
-          selectedText: payload.selectedText,
-          offset: payload.offset ?? -1,
-          x: payload.x ?? windowWidth / 2,
-          y: payload.y ?? 96,
-        });
-      }
-    },
-    [annotations, chapters.length, commitProgress, currentIndex, goToChapter, preferences.readingMode, showNotice, windowWidth]
+  const initialReadiumLocator = useMemo(
+    () => (currentChapterMeta ? readiumLocatorForChapter(currentChapterMeta, restoreRatio) : null),
+    [currentChapterMeta, restoreRatio]
   );
-
-  const applyReaderAnnotations = useCallback(() => {
-    webViewRef.current?.injectJavaScript(`
-      window.__INBOX_APPLY_ANNOTATIONS__ && window.__INBOX_APPLY_ANNOTATIONS__(${JSON.stringify(readerAnnotationMarks)});
-      true;
-    `);
-  }, [readerAnnotationMarks]);
-
-  const readerUiActive = chromeVisible || panel !== null;
-  const readerPanelActive = panel !== null;
-  const preserveEpubLayout = Boolean(book?.format === 'epub' && currentChapter?.htmlPath);
-  const injectedJavaScript = useMemo(
-    () => preferenceScript(preferences, restoreRatio, reduceMotion, readerUiActive, readerPanelActive, readerInsets, preserveEpubLayout),
-    [preferences, preserveEpubLayout, readerInsets, readerPanelActive, readerUiActive, reduceMotion, restoreRatio]
-  );
-  const injectedJavaScriptBeforeContentLoaded = useMemo(
-    () => initialReaderLayoutScript(preferences, restoreRatio, readerInsets, preserveEpubLayout),
-    [preferences, preserveEpubLayout, readerInsets, restoreRatio]
-  );
-  const readerSource = useMemo(() => {
-    if (!book || !currentChapter) {
-      return undefined;
-    }
-
-    return preserveEpubLayout && currentChapter.htmlPath
-      ? { uri: currentChapter.htmlPath }
-      : { html: readerHtmlForText(currentChapter, preferences, readerInsets, restoreRatio, currentIndex, chapters.length) };
-  }, [book, chapters.length, currentChapter, currentIndex, preferences, preserveEpubLayout, readerInsets, restoreRatio]);
-
-  useEffect(() => {
-    const nextInsets = JSON.stringify(readerInsets);
-    webViewRef.current?.injectJavaScript(`
-      if (window.__INBOX_APPLY_READER_LAYOUT__) {
-        window.__INBOX_APPLY_READER_LAYOUT__(${nextInsets}, ${readerUiActive ? 'true' : 'false'}, ${readerPanelActive ? 'true' : 'false'});
-      } else {
-        window.__INBOX_READER_INSETS__ = ${nextInsets};
-        window.__INBOX_UI_ACTIVE__ = ${readerUiActive ? 'true' : 'false'};
-        window.__INBOX_PANEL_ACTIVE__ = ${readerPanelActive ? 'true' : 'false'};
-      }
-      true;
-    `);
-  }, [readerInsets, readerPanelActive, readerUiActive]);
-
-  useEffect(() => {
-    applyReaderAnnotations();
-  }, [applyReaderAnnotations]);
 
   const saveNote = useCallback(async () => {
-    if (!book || !currentChapter || !noteDraft.trim()) {
+    if (!book || !currentChapterMeta || !noteDraft.trim()) {
       return;
     }
 
+    const noteChapter = noteSelection?.locator
+      ? chapterFromReadiumLocator(chapters, noteSelection.locator)?.chapter ?? currentChapterMeta
+      : currentChapterMeta;
     await createAnnotation(db, {
       bookId: book.id,
-      chapterId: currentChapter.id,
+      chapterId: noteChapter.id,
       type: 'note',
       selectedText: noteSelection?.selectedText,
       noteText: noteDraft.trim(),
       position: JSON.stringify(
         noteSelection
-          ? { offset: noteSelection.offset, quote: noteSelection.selectedText.slice(0, 140) }
-          : { chapterId: currentChapter.id }
+          ? { offset: noteSelection.offset, locator: noteSelection.locator, quote: noteSelection.selectedText.slice(0, 140) }
+          : { chapterId: currentChapterMeta.id }
       ),
     });
     setNoteDraft('');
@@ -1877,10 +1129,10 @@ export default function ReaderScreen() {
     setAnnotations(await listAnnotations(db, book.id));
     showNotice('笔记已保存');
     setPanel('notes');
-  }, [book, currentChapter, db, noteDraft, noteSelection, showNotice]);
+  }, [book, chapters, currentChapterMeta, db, noteDraft, noteSelection, showNotice]);
 
   const addBookmark = useCallback(async () => {
-    if (!book || !currentChapter) {
+    if (!book || !currentChapterMeta) {
       return;
     }
 
@@ -1893,15 +1145,15 @@ export default function ReaderScreen() {
 
     await createAnnotation(db, {
       bookId: book.id,
-      chapterId: currentChapter.id,
+      chapterId: currentChapterMeta.id,
       type: 'bookmark',
-      selectedText: currentChapter.title,
-      position: JSON.stringify({ chapterId: currentChapter.id }),
+      selectedText: currentChapterMeta.title,
+      position: JSON.stringify({ chapterId: currentChapterMeta.id, locator: useNativeReadium ? latestReadiumLocator.current : undefined }),
     });
     setAnnotations(await listAnnotations(db, book.id));
     showNotice('已加入本章书签');
     setPanel('notes');
-  }, [book, currentBookmark, currentChapter, db, showNotice]);
+  }, [book, currentBookmark, currentChapterMeta, db, showNotice, useNativeReadium]);
 
   const updatePreference = useCallback(
     async (next: ReaderPreferences) => {
@@ -1922,7 +1174,7 @@ export default function ReaderScreen() {
     );
   }
 
-  if (!book || !currentChapter) {
+  if (!book || !currentChapterMeta) {
     return (
       <M3Screen key={`reader-missing-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
         <View style={styles.stateWrap}>
@@ -1945,23 +1197,49 @@ export default function ReaderScreen() {
     );
   }
 
+  if (!useNativeReadium) {
+    return (
+      <M3Screen key={`reader-readium-placeholder-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+        <View style={styles.stateWrap}>
+          <M3StatePanel
+            theme={themeToken}
+            title="阅读器占位"
+            body={Platform.OS === 'android' ? '旧 WebView 引擎已移除。请重新导入这本书生成 Readium EPUB。' : '旧 WebView 引擎已移除；此平台的 Readium 阅读器后续接入。'}
+            artwork={<MaterialSymbol name="error" color={themeToken.accent} description="阅读器占位" decorative size={28} />}>
+            <IconButton
+              icon="chevron.left"
+              label="返回书架"
+              tone="quiet"
+              tintColor={themeToken.text}
+              style={{ backgroundColor: themeToken.surfaceContainerHigh, borderColor: themeToken.line }}
+              onPress={handleReaderBack}
+            />
+          </M3StatePanel>
+        </View>
+      </M3Screen>
+    );
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: readerTheme.background }]}>
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
-          <WebView
-            key={`${preferences.readerTheme}-${preferences.fontFamily}-${preferences.fontSize}-${preferences.lineHeight}-${preferences.margin}-${preferences.readingMode}`}
-            ref={webViewRef}
-            originWhitelist={['*']}
-            source={readerSource}
-            onMessage={handleWebMessage}
-            onLoadEnd={applyReaderAnnotations}
-            injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
-            injectedJavaScript={injectedJavaScript}
-            javaScriptEnabled
-            showsVerticalScrollIndicator={false}
-            containerStyle={{ backgroundColor: readerTheme.background }}
-            style={[styles.webView, { backgroundColor: readerTheme.background }]}
+          <InboxReaderView
+            ref={nativeReaderRef}
+            key={`readium-${book.id}-${book.publicationUri}`}
+            fileUri={book.publicationUri ?? book.fileUri}
+            initialLocator={initialReadiumLocator}
+            initialReadingOrderIndex={currentIndex}
+            initialProgression={restoreRatio}
+            preferences={preferences}
+            decorations={readiumDecorations}
+            onLocationChange={handleReadiumLocationChange}
+            onSelectionChange={handleReadiumSelectionChange}
+            onTap={handleReadiumTap}
+            onDecorationPress={handleReadiumDecorationPress}
+            onError={(event) => showNotice(event.nativeEvent.message)}
+            onExternalLink={handleReadiumExternalLink}
+            style={[styles.readerView, { backgroundColor: readerTheme.background }]}
           />
         </View>
       </Link.AppleZoomTarget>
@@ -2008,7 +1286,7 @@ export default function ReaderScreen() {
                 {bookTitleLabel(book.title)}
               </Text>
               <Text numberOfLines={1} style={[styles.chromeMeta, { color: chromeTheme.muted }]}>
-                {chapterLabel(currentChapter.title)}
+                {chapterLabel(currentChapterMeta.title)}
                 {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
               </Text>
             </View>
@@ -2027,15 +1305,16 @@ export default function ReaderScreen() {
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <View style={[styles.chapterStrip, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
               <M3Pressable
+                captureTouches
                 disabled={currentIndex === 0}
                 onPress={() => goToChapter(Math.max(0, currentIndex - 1), preferences.readingMode === 'page' ? 1 : 0)}
                 feedback="subtle"
                 style={[styles.chapterTextButton, currentIndex === 0 && styles.disabledChapterButton]}>
                 <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>上一章</Text>
               </M3Pressable>
-              <M3Pressable onPress={() => setPanel(panel === 'toc' ? null : 'toc')} feedback="subtle" style={styles.chapterCenter}>
+              <M3Pressable captureTouches onPress={() => setPanel(panel === 'toc' ? null : 'toc')} feedback="subtle" style={styles.chapterCenter}>
                 <Text numberOfLines={1} style={[styles.chapterCenterTitle, { color: chromeTheme.text }]}>
-                  {chapterLabel(currentChapter.title)}
+                  {chapterLabel(currentChapterMeta.title)}
                 </Text>
                 <Text style={[styles.chapterCenterMeta, { color: chromeTheme.muted }]}>
                   {currentIndex + 1}/{chapters.length}
@@ -2043,6 +1322,7 @@ export default function ReaderScreen() {
                 </Text>
               </M3Pressable>
               <M3Pressable
+                captureTouches
                 disabled={currentIndex >= chapters.length - 1}
                 onPress={() => goToChapter(Math.min(chapters.length - 1, currentIndex + 1), 0)}
                 feedback="subtle"
@@ -2205,6 +1485,34 @@ export default function ReaderScreen() {
                       {currentBookmark ? '已标记当前章' : '收藏当前位置'}
                     </Text>
                   </M3Pressable>
+                  {useNativeReadium && (
+                    <>
+                      <M3Pressable
+                        captureTouches
+                        onPress={saveReadiumSelectionHighlight}
+                        feedback="standard"
+                        accessibilityRole="button"
+                        style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                        <View style={styles.annotationActionHeader}>
+                          <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="选区划线" decorative size={18} />
+                          <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>选区划线</Text>
+                        </View>
+                        <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>保存选中文字</Text>
+                      </M3Pressable>
+                      <M3Pressable
+                        captureTouches
+                        onPress={startReadiumSelectionNote}
+                        feedback="standard"
+                        accessibilityRole="button"
+                        style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+                        <View style={styles.annotationActionHeader}>
+                          <MaterialSymbol name="note" color={chromeTheme.accent} description="选区笔记" decorative size={18} />
+                          <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>选区笔记</Text>
+                        </View>
+                        <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>附到原文</Text>
+                      </M3Pressable>
+                    </>
+                  )}
                 </View>
                 {noteSelection && (
                   <View style={[styles.selectionQuoteCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
@@ -2222,7 +1530,7 @@ export default function ReaderScreen() {
                   multiline
                   style={[styles.panelInput, styles.noteInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
                 />
-                <M3Pressable onPress={saveNote} feedback="standard" style={styles.saveNoteButton}>
+                <M3Pressable captureTouches onPress={saveNote} feedback="standard" style={styles.saveNoteButton}>
                   <Text style={styles.saveNoteText}>保存笔记</Text>
                 </M3Pressable>
                 <View style={styles.filterRow}>
@@ -2277,7 +1585,9 @@ export default function ReaderScreen() {
                   {filteredAnnotations.length === 0 && (
                     <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
                       <Text style={[styles.emptyPanelTitle, { color: chromeTheme.text }]}>还没有{annotationFilter === 'all' ? '标注' : annotationLabels[annotationFilter]}</Text>
-                      <Text style={[styles.emptyPanelBody, { color: chromeTheme.muted }]}>书签、划线和笔记会出现在这里。</Text>
+                      <Text style={[styles.emptyPanelBody, { color: chromeTheme.muted }]}>
+                        书签、划线和笔记会出现在这里。
+                      </Text>
                     </View>
                   )}
                 </ScrollView>
@@ -2422,7 +1732,7 @@ const styles = StyleSheet.create({
   readerCanvas: {
     flex: 1,
   },
-  webView: {
+  readerView: {
     flex: 1,
   },
   selectionToolbar: {
@@ -2466,6 +1776,8 @@ const styles = StyleSheet.create({
     left: 18,
     right: 18,
     top: 48,
+    zIndex: 40,
+    elevation: 16,
   },
   topBar: {
     minHeight: 56,
@@ -2511,6 +1823,8 @@ const styles = StyleSheet.create({
     left: 18,
     right: 18,
     bottom: 18,
+    zIndex: 40,
+    elevation: 16,
   },
   readerDock: {
     borderRadius: brand.radius.extraLarge,

@@ -1,10 +1,21 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 9;
 
 export async function migrateReaderDb(db: SQLiteDatabase) {
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
   const currentVersion = row?.user_version ?? 0;
+
+  if (currentVersion > 0 && currentVersion < DATABASE_VERSION) {
+    await db.execAsync(`
+      DROP TABLE IF EXISTS search_index;
+      DROP TABLE IF EXISTS annotations;
+      DROP TABLE IF EXISTS reading_progress;
+      DROP TABLE IF EXISTS chapters;
+      DROP TABLE IF EXISTS books;
+      DROP TABLE IF EXISTS reader_preferences;
+    `);
+  }
 
   await db.execAsync(`
     PRAGMA journal_mode = 'wal';
@@ -15,6 +26,7 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
       author TEXT NOT NULL,
       format TEXT NOT NULL,
       file_uri TEXT NOT NULL,
+      publication_uri TEXT,
       cover_uri TEXT,
       imported_at TEXT NOT NULL,
       last_opened_at TEXT,
@@ -27,7 +39,6 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
       href TEXT NOT NULL,
       title TEXT NOT NULL,
       chapter_order INTEGER NOT NULL,
-      html_path TEXT,
       text_content TEXT NOT NULL,
       word_count INTEGER NOT NULL,
       FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
@@ -84,57 +95,7 @@ export async function migrateReaderDb(db: SQLiteDatabase) {
       margin INTEGER NOT NULL,
       reading_mode TEXT NOT NULL DEFAULT 'scroll'
     );
-
   `);
-
-  if (currentVersion < 2) {
-    await db.execAsync(`
-      DELETE FROM reading_progress
-       WHERE book_id IN (
-        SELECT b.id
-          FROM books b
-          JOIN reading_progress p ON p.book_id = b.id
-         WHERE p.scroll_ratio = 0
-           AND p.updated_at = b.imported_at
-           AND b.last_opened_at = b.imported_at
-       );
-
-      UPDATE books
-         SET last_opened_at = NULL
-       WHERE last_opened_at = imported_at
-         AND id NOT IN (SELECT book_id FROM reading_progress);
-    `);
-  }
-
-  const preferenceColumns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(reader_preferences)');
-  if (!preferenceColumns.some((column) => column.name === 'reading_mode')) {
-    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN reading_mode TEXT NOT NULL DEFAULT 'scroll';`);
-  }
-  if (!preferenceColumns.some((column) => column.name === 'app_theme_mode')) {
-    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN app_theme_mode TEXT NOT NULL DEFAULT 'system';`);
-    await db.execAsync(`
-      UPDATE reader_preferences
-         SET app_theme_mode = CASE
-           WHEN theme = 'deep' THEN 'deep'
-           WHEN theme = 'mist' THEN 'mist'
-           WHEN theme = 'reading' THEN 'mist'
-           ELSE 'system'
-         END;
-    `);
-  }
-  if (!preferenceColumns.some((column) => column.name === 'reader_theme')) {
-    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN reader_theme TEXT NOT NULL DEFAULT 'paper';`);
-    await db.execAsync(`
-      UPDATE reader_preferences
-         SET reader_theme = CASE
-           WHEN theme = 'deep' THEN 'night'
-           ELSE 'paper'
-         END;
-    `);
-  }
-  if (!preferenceColumns.some((column) => column.name === 'font_family')) {
-    await db.execAsync(`ALTER TABLE reader_preferences ADD COLUMN font_family TEXT NOT NULL DEFAULT 'system';`);
-  }
 
   await db.runAsync(
     `INSERT OR IGNORE INTO reader_preferences (id, theme, app_theme_mode, reader_theme, font_family, font_size, line_height, margin, reading_mode)

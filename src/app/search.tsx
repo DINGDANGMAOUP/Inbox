@@ -1,6 +1,7 @@
 import { useSQLiteContext } from 'expo-sqlite';
+import { FlashList } from '@shopify/flash-list';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Keyboard, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, BackHandler, Keyboard, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { LibraryBookRow } from '@/components/reader/library-book-row';
@@ -30,6 +31,10 @@ function normalizedSearchText(book: LibraryBook) {
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
+}
+
+function BookSeparator() {
+  return <View style={styles.bookSeparator} />;
 }
 
 export default function SearchScreen() {
@@ -90,6 +95,67 @@ export default function SearchScreen() {
   }, [books, hasQuery, trimmedQuery]);
 
   const resultLabel = hasQuery ? `${results.length} 个结果` : '输入关键词搜索';
+  const renderBook = useCallback(
+    ({ item: book }: { item: LibraryBook }) => <LibraryBookRow book={book} theme={resolvedAppTheme} />,
+    [resolvedAppTheme]
+  );
+
+  const listHeader = (
+    <View style={[styles.searchListHeader, (loading || hasQuery) && styles.searchListHeaderWithBody]}>
+      <View style={[styles.searchHeader, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+        <IconButton
+          icon="chevron.left"
+          label="返回"
+          tone="quiet"
+          tintColor={theme.text}
+          size="icon"
+          style={[styles.headerButton, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}
+          onPress={closeSearch}
+        />
+        <View style={[styles.searchField, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}>
+          <MaterialSymbol name="magnifyingglass" color={theme.accent} description="搜索" decorative size={18} />
+          <TextInput
+            ref={inputRef}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="搜索书名、作者或章节"
+            placeholderTextColor={theme.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="搜索书架"
+            style={[styles.searchInput, { color: theme.text }]}
+          />
+          {query ? (
+            <M3Pressable captureTouches hitSlop={8} onPress={() => setQuery('')} feedback="subtle" accessibilityLabel="清除搜索" style={styles.clearButton}>
+              <MaterialSymbol name="close" color={theme.muted} description="清除搜索" decorative size={17} />
+            </M3Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.searchTitleBlock}>
+        <Text style={[styles.kicker, { color: theme.accent }]}>SEARCH LIBRARY</Text>
+        <Text style={[styles.title, { color: theme.text }]}>搜索书架</Text>
+        <Text style={[styles.subtitle, { color: theme.muted }]}>{resultLabel}</Text>
+      </View>
+    </View>
+  );
+
+  const emptyList = loading ? (
+    <M3StatePanel theme={theme} title="正在读取书架" artwork={<ActivityIndicator color={theme.accent} />} />
+  ) : hasQuery ? (
+    <Animated.View entering={m3Motion.fadeDown()} style={[styles.noResultPanel, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+      <View style={[styles.noResultIcon, { backgroundColor: theme.primaryContainer }]}>
+        <MaterialSymbol name="magnifyingglass" color={theme.onPrimaryContainer} description="没有结果" decorative size={24} />
+      </View>
+      <Text style={[styles.noResultTitle, { color: theme.text }]}>没有找到这本书</Text>
+      <Text style={[styles.noResultBody, { color: theme.muted }]}>换个书名、作者或章节关键词试试。</Text>
+      <M3Pressable onPress={() => setQuery('')} feedback="subtle" style={[styles.resetButton, { backgroundColor: theme.primaryContainer }]}>
+        <Text style={[styles.resetButtonText, { color: theme.onPrimaryContainer }]}>清除搜索</Text>
+      </M3Pressable>
+    </Animated.View>
+  ) : null;
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
@@ -98,69 +164,19 @@ export default function SearchScreen() {
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
         overlayColor={theme.background}>
-        <ScrollView
+        <FlashList
+          style={styles.scroller}
+          data={hasQuery ? results : []}
+          renderItem={renderBook}
+          keyExtractor={(book) => book.id}
+          extraData={resolvedAppTheme}
+          ListHeaderComponent={listHeader}
+          ListEmptyComponent={emptyList}
+          ItemSeparatorComponent={BookSeparator}
           keyboardShouldPersistTaps="always"
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
-          <View style={[styles.searchHeader, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-            <IconButton
-              icon="chevron.left"
-              label="返回"
-              tone="quiet"
-              tintColor={theme.text}
-              size="icon"
-              style={[styles.headerButton, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}
-              onPress={closeSearch}
-            />
-            <View style={[styles.searchField, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}>
-              <MaterialSymbol name="magnifyingglass" color={theme.accent} description="搜索" decorative size={18} />
-              <TextInput
-                ref={inputRef}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="搜索书名、作者或章节"
-                placeholderTextColor={theme.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
-                accessibilityLabel="搜索书架"
-                style={[styles.searchInput, { color: theme.text }]}
-              />
-              {query ? (
-                <M3Pressable captureTouches hitSlop={8} onPress={() => setQuery('')} feedback="subtle" accessibilityLabel="清除搜索" style={styles.clearButton}>
-                  <MaterialSymbol name="close" color={theme.muted} description="清除搜索" decorative size={17} />
-                </M3Pressable>
-              ) : null}
-            </View>
-          </View>
-
-          <View style={styles.searchTitleBlock}>
-            <Text style={[styles.kicker, { color: theme.accent }]}>SEARCH LIBRARY</Text>
-            <Text style={[styles.title, { color: theme.text }]}>搜索书架</Text>
-            <Text style={[styles.subtitle, { color: theme.muted }]}>{resultLabel}</Text>
-          </View>
-
-          {loading ? (
-            <M3StatePanel theme={theme} title="正在读取书架" artwork={<ActivityIndicator color={theme.accent} />} />
-          ) : hasQuery && results.length ? (
-            <View style={styles.resultList}>
-              {results.map((book, index) => (
-                <LibraryBookRow key={book.id} book={book} index={index} theme={resolvedAppTheme} />
-              ))}
-            </View>
-          ) : hasQuery ? (
-            <Animated.View entering={m3Motion.fadeDown()} style={[styles.noResultPanel, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-              <View style={[styles.noResultIcon, { backgroundColor: theme.primaryContainer }]}>
-                <MaterialSymbol name="magnifyingglass" color={theme.onPrimaryContainer} description="没有结果" decorative size={24} />
-              </View>
-              <Text style={[styles.noResultTitle, { color: theme.text }]}>没有找到这本书</Text>
-              <Text style={[styles.noResultBody, { color: theme.muted }]}>换个书名、作者或章节关键词试试。</Text>
-              <M3Pressable onPress={() => setQuery('')} feedback="subtle" style={[styles.resetButton, { backgroundColor: theme.primaryContainer }]}>
-                <Text style={[styles.resetButtonText, { color: theme.onPrimaryContainer }]}>清除搜索</Text>
-              </M3Pressable>
-            </Animated.View>
-          ) : null}
-        </ScrollView>
+          contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}
+        />
       </M3Screen>
     </Animated.View>
   );
@@ -170,16 +186,25 @@ const styles = StyleSheet.create({
   routeShell: {
     flex: 1,
   },
+  scroller: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   content: {
     paddingHorizontal: 20,
     paddingTop: 44,
     paddingBottom: 44,
-    gap: 20,
   },
   contentWide: {
     width: '100%',
     maxWidth: 820,
     alignSelf: 'center',
+  },
+  searchListHeader: {
+    gap: 20,
+  },
+  searchListHeaderWithBody: {
+    marginBottom: 20,
   },
   searchHeader: {
     minHeight: 66,
@@ -247,8 +272,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
   },
-  resultList: {
-    gap: 12,
+  bookSeparator: {
+    height: 12,
   },
   noResultPanel: {
     minHeight: 260,

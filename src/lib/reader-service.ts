@@ -2,14 +2,17 @@ import { Directory, File, Paths } from "expo-file-system";
 import type { SQLiteDatabase } from "expo-sqlite";
 
 import { decodeBookText, hasDecodeDamage } from "@/lib/book-text-decoder";
-import { EPUB_LAYOUT_MARKER, parseEpub, type ParsedBook } from "@/lib/epub-parser";
+import { parseEpub, type ParsedBook } from "@/lib/epub-parser";
+import { buildInternalEpub, internalEpubChapterHref } from "@/lib/publication-package";
 import {
   cleanChapterTitle,
   excerptAround,
   hashBytes,
   legacyHashBytes,
+  MAX_READER_CHAPTER_CHARS,
   makeId,
   safeFileName,
+  splitLongReaderText,
   splitTxtIntoChapters,
   wordCount,
 } from "@/lib/text-utils";
@@ -32,6 +35,7 @@ type BookRow = {
   author: string;
   format: "epub" | "txt";
   file_uri: string;
+  publication_uri?: string | null;
   cover_uri: string | null;
   imported_at: string;
   last_opened_at: string | null;
@@ -48,8 +52,8 @@ type ChapterRow = {
   href: string;
   title: string;
   chapter_order: number;
-  html_path: string | null;
   text_content: string;
+  text_length?: number;
   word_count: number;
 };
 
@@ -71,12 +75,12 @@ type StoredChapter = {
   href: string;
   title: string;
   order: number;
-  htmlPath: string | null;
   text: string;
   wordCount: number;
 };
 
 const readerDirectory = new Directory(Paths.document, "inbox-reader");
+const INTERNAL_PUBLICATION_VERSION = "readium-internal-epub-v3-soft-paragraph-chunks";
 
 function normalizeAppThemeMode(theme?: string | null): AppThemeMode {
   if (theme === "system" || theme === "mist" || theme === "deep") {
@@ -131,6 +135,7 @@ function mapBook(row: BookRow): Book {
     author: row.author,
     format: row.format,
     fileUri: row.file_uri,
+    publicationUri: row.publication_uri,
     coverUri: row.cover_uri,
     importedAt: row.imported_at,
     lastOpenedAt: row.last_opened_at,
@@ -155,8 +160,8 @@ function mapChapter(row: ChapterRow): Chapter {
     href: row.href,
     title: row.title,
     order: row.chapter_order,
-    htmlPath: row.html_path,
     textContent: row.text_content,
+    textLength: row.text_length ?? row.text_content.length,
     wordCount: row.word_count,
   };
 }
@@ -180,19 +185,6 @@ function ensureReaderDirectory() {
   readerDirectory.create({ idempotent: true, intermediates: true });
 }
 
-function fileInDirectory(root: Directory, path: string) {
-  const parts = path.split("/").filter(Boolean);
-  const fileName = parts.pop() ?? "file";
-  let directory = root;
-
-  for (const part of parts) {
-    directory = new Directory(directory, part);
-    directory.create({ idempotent: true, intermediates: true });
-  }
-
-  return new File(directory, fileName);
-}
-
 async function copyFileToPrivateFile(
   sourceFile: File,
   originalName: string,
@@ -210,38 +202,51 @@ async function copyFileToPrivateFile(
   return { tempDir, tempFile, bytes };
 }
 
+function splitLongChapters(parsed: ParsedBook): ParsedBook {
+  const chapters = parsed.chapters.flatMap((chapter) => {
+    const parts = splitLongReaderText(chapter.text);
+    if (parts.length === 1) {
+      return [chapter];
+    }
+
+    return parts.map((text, index) => ({
+      ...chapter,
+      id: `${chapter.id}_${index + 1}`,
+      href: `${chapter.href}#chunk-${index + 1}`,
+      title: chapter.title,
+      text,
+      wordCount: wordCount(text),
+    }));
+  });
+
+  return {
+    ...parsed,
+    chapters: chapters.map((chapter, order) => ({ ...chapter, order })),
+  };
+}
+
+function usesInternalReadiumPublication(parsed: ParsedBook) {
+  return parsed.format === "txt" || parsed.chapters.some((chapter) => chapter.href.includes("#chunk-"));
+}
+
 function writeParsedChapters(
   parsed: ParsedBook,
-  bookDir: Directory,
   id: string,
   existingRows: ChapterRow[] = [],
 ): StoredChapter[] {
+  const usesInternalPublication = usesInternalReadiumPublication(parsed);
   return parsed.chapters.map((chapter, index) => {
-    const existing = existingRows.find((row) => row.href === chapter.href) ?? existingRows.find((row) => row.chapter_order === chapter.order);
-    const htmlPath =
-      parsed.format === "epub"
-        ? fileInDirectory(bookDir, `epub/${chapter.href || `chapter-${String(index + 1).padStart(4, "0")}.html`}`)
-        : null;
-
-    if (htmlPath) {
-      htmlPath.create({ overwrite: true, intermediates: true });
-      htmlPath.write(chapter.html);
-    }
-
+    const splitMatch = chapter.href.match(/^(.*)#chunk-(\d+)$/);
+    const existing =
+      existingRows.find((row) => row.href === chapter.href) ??
+      (splitMatch?.[2] === "1" ? existingRows.find((row) => row.href === splitMatch[1]) : undefined) ??
+      (!splitMatch ? existingRows.find((row) => row.chapter_order === chapter.order) : undefined);
     return {
       ...chapter,
       id: existing?.id ?? `${id}_${chapter.id}`,
-      htmlPath: htmlPath?.uri ?? null,
+      href: usesInternalPublication ? internalEpubChapterHref(index) : chapter.href,
     };
   });
-}
-
-function writeParsedResources(parsed: ParsedBook, bookDir: Directory) {
-  for (const resource of parsed.resources ?? []) {
-    const file = fileInDirectory(bookDir, `epub/${resource.path}`);
-    file.create({ overwrite: true, intermediates: true });
-    file.write(resource.bytes);
-  }
 }
 
 async function writeParsedBookFiles(
@@ -256,14 +261,63 @@ async function writeParsedBookFiles(
   const storedName = safeFileName(originalName);
   const storedFile = new File(bookDir, storedName);
   await importedFile.copy(storedFile, { overwrite: true });
-  writeParsedResources(parsed, bookDir);
-  const chapters = writeParsedChapters(parsed, bookDir, id);
+  const chapters = writeParsedChapters(parsed, id);
+  const publicationUri = writeReadiumPublication(parsed, bookDir, id, storedFile.uri);
 
   return {
     id,
     fileUri: storedFile.uri,
+    publicationUri,
     chapters,
   };
+}
+
+function writeReadiumPublication(
+  parsed: ParsedBook,
+  bookDir: Directory,
+  id: string,
+  fallbackUri: string,
+) {
+  if (!usesInternalReadiumPublication(parsed)) {
+    return fallbackUri;
+  }
+
+  const publicationFile = new File(bookDir, "publication.epub");
+  publicationFile.create({ overwrite: true, intermediates: true });
+  publicationFile.write(buildInternalEpub(parsed, id));
+  const publicationVersionFile = new File(bookDir, "publication.version");
+  publicationVersionFile.create({ overwrite: true, intermediates: true });
+  publicationVersionFile.write(INTERNAL_PUBLICATION_VERSION);
+  return publicationFile.uri;
+}
+
+function isInternalEpubUri(uri?: string | null) {
+  return Boolean(uri?.split(/[?#]/)[0]?.toLowerCase().endsWith(".epub"));
+}
+
+async function needsInternalPublicationVersionRefresh(book: Book) {
+  if (!isInternalEpubUri(book.publicationUri)) {
+    return false;
+  }
+
+  try {
+    const versionUri = book.publicationUri!.split(/[?#]/)[0].replace(/[^/]+$/, "publication.version");
+    return (await new File(versionUri).text()).trim() !== INTERNAL_PUBLICATION_VERSION;
+  } catch {
+    return true;
+  }
+}
+
+function needsTxtReadiumRefresh(book: Book, rows: ChapterRow[]) {
+  if (book.format !== "txt") {
+    return false;
+  }
+
+  if (!isInternalEpubUri(book.publicationUri)) {
+    return true;
+  }
+
+  return rows.some((row, index) => row.href !== internalEpubChapterHref(index));
 }
 
 async function insertChapters(
@@ -273,14 +327,13 @@ async function insertChapters(
 ) {
   for (const chapter of chapters) {
     await db.runAsync(
-      `INSERT INTO chapters (id, book_id, href, title, chapter_order, html_path, text_content, word_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chapters (id, book_id, href, title, chapter_order, text_content, word_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       chapter.id,
       bookId,
       chapter.href,
       chapter.title,
       chapter.order,
-      chapter.htmlPath,
       chapter.text,
       chapter.wordCount,
     );
@@ -319,7 +372,6 @@ function parseTxt(
     href: `txt:${index}`,
     title: chapter.title,
     order: index,
-    html: "",
     text: chapter.text,
     wordCount: wordCount(chapter.text),
   }));
@@ -357,10 +409,11 @@ async function importBookFile(
   const contentHash = hashBytes(bytes);
   const id = `book_${contentHash}`;
   const legacyId = `book_${legacyHashBytes(bytes)}`;
-  const parsed =
+  const parsed = splitLongChapters(
     inferredFormat === "epub"
       ? parseEpub(bytes, originalName)
-      : parseTxt(bytes, originalName);
+      : parseTxt(bytes, originalName),
+  );
   const now = new Date().toISOString();
 
   const existing = await db.getFirstAsync<{ id: string }>(
@@ -382,13 +435,14 @@ async function importBookFile(
 
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      `INSERT INTO books (id, title, author, format, file_uri, cover_uri, imported_at, last_opened_at, total_chapters)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO books (id, title, author, format, file_uri, publication_uri, cover_uri, imported_at, last_opened_at, total_chapters)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       stored.id,
       parsed.title,
       parsed.author,
       parsed.format,
       stored.fileUri,
+      stored.publicationUri,
       null,
       now,
       null,
@@ -455,15 +509,112 @@ async function getChapterRows(db: SQLiteDatabase, bookId: string) {
   );
 }
 
+async function getChapterSummaryRows(db: SQLiteDatabase, bookId: string) {
+  return db.getAllAsync<ChapterRow>(
+    `SELECT id,
+            book_id,
+            href,
+            title,
+            chapter_order,
+            '' AS text_content,
+            length(text_content) AS text_length,
+            word_count
+       FROM chapters
+      WHERE book_id = ?
+      ORDER BY chapter_order ASC`,
+    bookId,
+  );
+}
+
 export async function getChapters(db: SQLiteDatabase, bookId: string) {
   const rows = await getChapterRows(db, bookId);
   return rows.map(mapChapter);
+}
+
+export async function getChapter(
+  db: SQLiteDatabase,
+  bookId: string,
+  chapterId: string,
+) {
+  const row = await db.getFirstAsync<ChapterRow>(
+    "SELECT * FROM chapters WHERE book_id = ? AND id = ?",
+    bookId,
+    chapterId,
+  );
+  if (!row) {
+    return null;
+  }
+  if (!hasDecodeDamage(row.title) && !hasDecodeDamage(row.text_content)) {
+    return mapChapter(row);
+  }
+
+  const book = await getBook(db, bookId);
+  if (!book) {
+    return mapChapter(row);
+  }
+  const refreshed = await refreshDecodedChaptersIfNeeded(db, book, await getChapterRows(db, bookId));
+  if (!refreshed.refreshed) {
+    return mapChapter(row);
+  }
+
+  const nextRow = await db.getFirstAsync<ChapterRow>(
+    "SELECT * FROM chapters WHERE book_id = ? AND id = ?",
+    bookId,
+    chapterId,
+  );
+  return nextRow ? mapChapter(nextRow) : mapChapter(row);
 }
 
 function fileNameFromUri(uri: string, fallback: string) {
   const rawPath = uri.split(/[?#]/)[0];
   const name = safeDecodeURIComponent(rawPath).split("/").pop();
   return name || fallback;
+}
+
+function remapProgressAfterSplit(
+  progress: { chapter_id: string; scroll_ratio: number } | null,
+  existingRows: ChapterRow[],
+  chapters: StoredChapter[],
+) {
+  if (!progress) {
+    return null;
+  }
+
+  const existing = existingRows.find((row) => row.id === progress.chapter_id);
+  if (!existing) {
+    return chapters.some((chapter) => chapter.id === progress.chapter_id)
+      ? { chapterId: progress.chapter_id, ratio: progress.scroll_ratio }
+      : null;
+  }
+
+  const splitMatch = existing.href.match(/^(.*)#chunk-(\d+)$/);
+  const baseHref = splitMatch?.[1] ?? existing.href;
+  const parts = chapters.filter(
+    (chapter) =>
+      chapter.href === baseHref ||
+      chapter.href.startsWith(`${baseHref}#chunk-`),
+  );
+  if (!parts.length) {
+    const sameOrder = chapters.find((chapter) => chapter.order === existing.chapter_order);
+    return sameOrder ? { chapterId: sameOrder.id, ratio: progress.scroll_ratio } : null;
+  }
+
+  if (splitMatch) {
+    const partIndex = Number(splitMatch[2]) - 1;
+    const part = Number.isFinite(partIndex) ? parts[partIndex] : undefined;
+    return part ? { chapterId: part.id, ratio: progress.scroll_ratio } : null;
+  }
+
+  const sourceLength = Math.max(1, existing.text_length ?? existing.text_content.length);
+  let offset = sourceLength * Math.max(0, Math.min(1, progress.scroll_ratio));
+  for (const part of parts) {
+    if (offset <= part.text.length) {
+      return { chapterId: part.id, ratio: Math.max(0, Math.min(0.96, offset / Math.max(1, part.text.length))) };
+    }
+    offset -= part.text.length;
+  }
+
+  return { chapterId: parts[parts.length - 1].id, ratio: 0.96 };
 }
 
 function safeDecodeURIComponent(value: string) {
@@ -481,42 +632,30 @@ async function replaceBookContents(
 ) {
   const bookDir = new Directory(readerDirectory, book.id);
   bookDir.create({ idempotent: true, intermediates: true });
-  writeParsedResources(parsed, bookDir);
   const existingRows = await getChapterRows(db, book.id);
-  const chapters = writeParsedChapters(parsed, bookDir, book.id, existingRows);
+  const chapters = writeParsedChapters(parsed, book.id, existingRows);
+  const publicationUri = writeReadiumPublication(parsed, bookDir, book.id, book.fileUri);
+  const nextProgress = remapProgressAfterSplit(await getProgress(db, book.id), existingRows, chapters);
 
   await db.withTransactionAsync(async () => {
     await db.runAsync("DELETE FROM search_index WHERE book_id = ?", book.id);
     await db.runAsync("DELETE FROM chapters WHERE book_id = ?", book.id);
     await db.runAsync(
       `UPDATE books
-          SET title = ?, author = ?, format = ?, total_chapters = ?
+          SET title = ?, author = ?, format = ?, publication_uri = ?, total_chapters = ?
         WHERE id = ?`,
       parsed.title,
       parsed.author,
       parsed.format,
+      publicationUri,
       chapters.length,
       book.id,
     );
     await insertChapters(db, book.id, chapters);
+    if (nextProgress) {
+      await saveProgress(db, book.id, nextProgress.chapterId, nextProgress.ratio);
+    }
   });
-}
-
-async function shouldRefreshEpubLayout(book: Book, rows: ChapterRow[]) {
-  if (book.format !== "epub") {
-    return false;
-  }
-
-  const firstHtmlPath = rows.find((row) => row.html_path)?.html_path;
-  if (!firstHtmlPath) {
-    return true;
-  }
-
-  try {
-    return !(await new File(firstHtmlPath).text()).includes(EPUB_LAYOUT_MARKER);
-  } catch {
-    return true;
-  }
 }
 
 async function refreshDecodedChaptersIfNeeded(
@@ -524,8 +663,14 @@ async function refreshDecodedChaptersIfNeeded(
   book: Book,
   rows: ChapterRow[],
 ) {
-  const needsLayoutRefresh = await shouldRefreshEpubLayout(book, rows);
-  if (!needsLayoutRefresh && !rows.some((row) => hasDecodeDamage(row.title) || hasDecodeDamage(row.text_content))) {
+  const needsPublicationVersionRefresh = await needsInternalPublicationVersionRefresh(book);
+  const hasOversizedChapter = rows.some((row) => (row.text_length ?? row.text_content.length) > MAX_READER_CHAPTER_CHARS);
+  if (
+    !needsTxtReadiumRefresh(book, rows) &&
+    !needsPublicationVersionRefresh &&
+    !hasOversizedChapter &&
+    !rows.some((row) => hasDecodeDamage(row.title) || hasDecodeDamage(row.text_content))
+  ) {
     return { chapters: rows.map(mapChapter), refreshed: false };
   }
 
@@ -533,10 +678,11 @@ async function refreshDecodedChaptersIfNeeded(
     const source = new File(book.fileUri);
     const bytes = await source.bytes();
     const fallbackName = fileNameFromUri(book.fileUri, `${book.title}.${book.format}`);
-    const parsed =
+    const parsed = splitLongChapters(
       book.format === "epub"
         ? parseEpub(bytes, fallbackName)
-        : parseTxt(bytes, fallbackName);
+        : parseTxt(bytes, fallbackName),
+    );
     await replaceBookContents(db, book, parsed);
     return { chapters: (await getChapterRows(db, book.id)).map(mapChapter), refreshed: true };
   } catch {
@@ -560,13 +706,16 @@ export async function openBook(db: SQLiteDatabase, bookId: string) {
     bookId,
   );
   const book = await getBook(db, bookId);
-  const rows = await getChapterRows(db, bookId);
+  let rows = await getChapterSummaryRows(db, bookId);
   const decoded = book
     ? await refreshDecodedChaptersIfNeeded(db, book, rows)
     : { chapters: rows.map(mapChapter), refreshed: false };
+  if (decoded.refreshed) {
+    rows = await getChapterSummaryRows(db, bookId);
+  }
   const openedBook = decoded.refreshed ? await getBook(db, bookId) : book;
   const progress = await getProgress(db, bookId);
-  return { book: openedBook, chapters: decoded.chapters, progress };
+  return { book: openedBook, chapters: rows.map(mapChapter), progress };
 }
 
 export async function saveProgress(

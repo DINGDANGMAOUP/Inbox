@@ -18,6 +18,7 @@ export type Book = {
   author: string;
   format: BookFormat;
   fileUri: string;
+  publicationUri?: string | null;
   coverUri?: string | null;
   importedAt: string;
   lastOpenedAt?: string | null;
@@ -30,8 +31,8 @@ export type Chapter = {
   href: string;
   title: string;
   order: number;
-  htmlPath?: string | null;
   textContent: string;
+  textLength?: number;
   wordCount: number;
 };
 

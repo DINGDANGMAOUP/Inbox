@@ -86,7 +86,10 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/with-readium-android",
+      "expo-image",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,

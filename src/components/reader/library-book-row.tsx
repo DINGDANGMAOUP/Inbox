@@ -1,13 +1,10 @@
 import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { BookCover } from '@/components/reader/book-cover';
 import { MaterialSymbol } from '@/components/reader/material-symbol';
-import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { brand } from '@/constants/brand';
-import { motion } from '@/constants/motion';
 import {
   authorLabel,
   bookProgressPercent,
@@ -19,7 +16,6 @@ import type { LibraryBook, ResolvedAppTheme } from '@/types/reader';
 
 export function LibraryBookRow({
   book,
-  index,
   theme,
   selectionMode = false,
   selected = false,
@@ -27,7 +23,6 @@ export function LibraryBookRow({
   onStartSelection,
 }: {
   book: LibraryBook;
-  index: number;
   theme: ResolvedAppTheme;
   selectionMode?: boolean;
   selected?: boolean;
@@ -39,11 +34,7 @@ export function LibraryBookRow({
   const openBook = () => router.push({ pathname: '/reader/[id]', params: { id: book.id } });
 
   return (
-    <Animated.View
-      entering={m3Motion.fadeDown(index * motion.stagger.listItem)}
-      exiting={m3Motion.fadeShortOut()}
-      layout={m3Motion.layoutMedium()}
-      style={styles.tile}>
+    <View style={styles.tile}>
       <M3Pressable
         onPress={() => (selectionMode ? onSelect?.(book) : openBook())}
         onLongPress={() => onStartSelection?.(book)}
@@ -87,7 +78,7 @@ export function LibraryBookRow({
           </View>
         </View>
       </M3Pressable>
-    </Animated.View>
+    </View>
   );
 }
 

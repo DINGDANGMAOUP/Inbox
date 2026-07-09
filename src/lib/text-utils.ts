@@ -41,8 +41,12 @@ export function stripHtml(html: string) {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<\/p>\s*<p\b[^>]*class=(["'])continued\1[^>]*>/gi, '')
+    .replace(/<p\b[^>]*class=(["'])continued\1[^>]*>/gi, '')
+    .replace(/<\/?(?:a|b|em|i|rp|rt|ruby|small|span|strong|sub|sup|u)\b[^>]*>/gi, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&#160;|&#xa0;/gi, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -61,6 +65,42 @@ export function wordCount(text: string) {
   const latinWords = compact.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g)?.length ?? 0;
   const cjkChars = compact.match(/[\u3400-\u9fff]/g)?.length ?? 0;
   return latinWords + cjkChars;
+}
+
+// Bound each internal EPUB spine item to a few phone screens; this keeps
+// the native reader renderer's tile memory low while preserving hidden chunking.
+export const MAX_READER_CHAPTER_CHARS = 2800;
+
+export function splitLongReaderText(text: string, maxLength = MAX_READER_CHAPTER_CHARS) {
+  if (text.length <= maxLength) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const target = Math.min(text.length, cursor + maxLength);
+    let end = target;
+
+    if (target < text.length) {
+      const candidates = [
+        text.lastIndexOf('\n\n', target),
+        text.lastIndexOf('\n', target),
+        text.lastIndexOf('。', target - 1) + 1,
+        text.lastIndexOf('.', target - 1) + 1,
+      ];
+      const naturalEnd = Math.max(...candidates);
+      if (naturalEnd > cursor + maxLength * 0.45) {
+        end = naturalEnd;
+      }
+    }
+
+    chunks.push(text.slice(cursor, end));
+    cursor = end > cursor ? end : target;
+  }
+
+  return chunks.length ? chunks : [text];
 }
 
 export function excerptAround(text: string, offset: number, queryLength: number) {

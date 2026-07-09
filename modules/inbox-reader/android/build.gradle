@@ -1,0 +1,39 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.inboxreader'
+version = '0.1.0'
+
+def kotlinVersion = "2.3.20"
+def readiumVersion = "3.3.0"
+
+android {
+  namespace "expo.modules.inboxreader"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  compileOptions {
+    coreLibraryDesugaringEnabled true
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  implementation "androidx.fragment:fragment-ktx:1.8.9"
+  implementation "androidx.annotation:annotation:1.10.0"
+  implementation "com.jakewharton.timber:timber:5.0.1"
+  implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
+  implementation "org.jetbrains.kotlinx:kotlinx-datetime:0.7.1"
+  implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0"
+  implementation "org.jsoup:jsoup:1.22.2"
+  implementation "org.readium.kotlin-toolkit:readium-shared:$readiumVersion"
+  implementation "org.readium.kotlin-toolkit:readium-streamer:$readiumVersion"
+  implementation "org.readium.kotlin-toolkit:readium-navigator:$readiumVersion"
+  coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
+}

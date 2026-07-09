@@ -42,8 +42,35 @@ function LoadingShell() {
   );
 }
 
-function isExternalBookUrl(url: string) {
-  return url.startsWith('content://') || url.startsWith('file://');
+function externalBookUrl(url: string) {
+  if (url.startsWith('content://') || url.startsWith('file://')) {
+    return url;
+  }
+
+  if (url.startsWith('inbox:///')) {
+    const path = decodeURIComponent(url.slice('inbox://'.length));
+    const isKnownAppRoute = /^\/(?:reader|search|settings|app-settings|storage|about)(?:\/|$)/.test(path);
+    if (isKnownAppRoute) {
+      return null;
+    }
+
+    return /\.(?:epub|txt)(?:$|[?#])/i.test(path) ? `file://${path}` : null;
+  }
+
+  if (!url.startsWith('inbox://')) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.endsWith('.documents')) {
+      return `content://${parsed.hostname}${decodeURIComponent(parsed.pathname)}`;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function ExternalBookImportHandler() {
@@ -52,13 +79,14 @@ function ExternalBookImportHandler() {
 
   const handleUrl = useCallback(
     async (url: string | null) => {
-      if (!url || !isExternalBookUrl(url) || importingRef.current) {
+      const bookUrl = url ? externalBookUrl(url) : null;
+      if (!bookUrl || importingRef.current) {
         return;
       }
 
       importingRef.current = true;
       try {
-        const book = await importBookFromUri(db, url);
+        const book = await importBookFromUri(db, bookUrl);
         if (book) {
           router.replace({ pathname: '/reader/[id]', params: { id: book.id } });
         }
@@ -146,6 +174,7 @@ export default function RootLayout() {
                   animation: 'fade_from_bottom',
                 }}
               />
+              <Stack.Screen name="+not-found" />
             </Stack>
           </SQLiteProvider>
         </Suspense>

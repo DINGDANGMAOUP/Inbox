@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from 'fflate';
 
-import { EPUB_LAYOUT_MARKER, parseEpub } from '../src/lib/epub-parser';
+import { parseEpub } from '../src/lib/epub-parser';
 
 const files = {
   'META-INF/container.xml': strToU8(`<?xml version="1.0"?>
@@ -35,23 +35,13 @@ const files = {
 };
 
 const parsed = parseEpub(zipSync(files), 'layout.epub');
-const html = parsed.chapters[0]?.html ?? '';
-const resourcePaths = new Set((parsed.resources ?? []).map((resource) => resource.path));
+const text = parsed.chapters[0]?.text ?? '';
 
-if (!html.includes(EPUB_LAYOUT_MARKER)) {
-  throw new Error('EPUB layout marker missing');
+if (!text.includes('原文排版')) {
+  throw new Error('EPUB chapter text missing');
 }
-if (!html.includes('--reader-font-family') || !html.includes('font-family: var(--reader-font-family')) {
-  throw new Error('EPUB reader font hook missing');
-}
-if (!html.includes('href="../Styles/book.css"') || !html.includes('class="book-layout"') || !html.includes('class="lead"')) {
-  throw new Error('EPUB HTML layout was not preserved');
-}
-if (html.includes('bad()') || html.includes('onclick=')) {
-  throw new Error('EPUB active content was not stripped');
-}
-if (!resourcePaths.has('OPS/Styles/book.css') || !resourcePaths.has('OPS/Images/pic.png')) {
-  throw new Error('EPUB resources were not collected');
+if (text.includes('bad()') || text.includes('onclick=')) {
+  throw new Error('EPUB active content leaked into text');
 }
 
 console.log('epub parser ok');

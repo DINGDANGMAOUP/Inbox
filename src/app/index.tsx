@@ -1,13 +1,12 @@
 import { router, useFocusEffect, type Href } from 'expo-router';
 import { Image } from 'expo-image';
 import { useSQLiteContext } from 'expo-sqlite';
+import { FlashList } from '@shopify/flash-list';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Pressable,
-  RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -46,6 +45,10 @@ function BrandSeal() {
       <Image source={brandAssets.logoMark} contentFit="contain" transition={160} style={styles.brandSealImage} />
     </View>
   );
+}
+
+function BookSeparator() {
+  return <View style={styles.bookSeparator} />;
 }
 
 function DrawerMenuItem({
@@ -264,58 +267,68 @@ export default function LibraryScreen() {
     router.push('/search' as Href);
   }, []);
 
-  return (
-    <M3Screen
-      key={`library-screen-${activeTheme}`}
-      theme={theme}
-      backgroundSource={appThemeAssets[activeTheme].background}
-      overlayColor={isDeepTheme ? 'rgba(5, 6, 8, 0.58)' : 'rgba(248, 245, 238, 0.76)'}>
-      <ScrollView
-        style={styles.scroller}
-        contentInsetAdjustmentBehavior="automatic"
-        refreshControl={<RefreshControl refreshing={loading && books.length > 0} onRefresh={refresh} />}
-        contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
-        <View style={styles.topAppBar}>
-          <View style={styles.brandRow}>
-            <M3Pressable
-              captureTouches
-              onPress={() => setMenuOpen(true)}
-              feedback="subtle"
-              hitSlop={8}
-              accessibilityLabel="打开菜单"
-              style={[styles.brandMenuButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-              <BrandSeal />
-            </M3Pressable>
-            <View style={styles.heroText}>
-              <Text numberOfLines={1} style={[styles.brandTitle, { color: ambientTextColor }]}>
-                墨屿
-              </Text>
-              <Text numberOfLines={1} style={[styles.brandSubtitle, { color: ambientMutedColor }]}>
-                INBOX
-              </Text>
-            </View>
-          </View>
-          <IconButton
-            icon="magnifyingglass"
-            label="搜索书架"
-            tone="quiet"
-            tintColor={theme.text}
-            size="icon"
-            style={[styles.searchIconButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}
-            onPress={openSearch}
-          />
-        </View>
+  const listExtraData = useMemo(
+    () => ({ activeTheme, selectedBookIds, selectionMode }),
+    [activeTheme, selectedBookIds, selectionMode]
+  );
 
-        <View style={styles.libraryHero}>
-          <Image source={appThemeAssets[activeTheme].materialBoard} contentFit="cover" transition={220} style={styles.heroMaterialBoard} />
-          <View style={styles.heroTint} />
-          <View style={styles.libraryHeroTop}>
-            <View style={styles.heroCopyBlock}>
-              <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
-              <Text style={styles.heroTitle}>私人书架{'\n'}安静长读</Text>
-            </View>
+  const renderBook = useCallback(
+    ({ item: book }: { item: LibraryBook }) => (
+      <LibraryBookRow
+        book={book}
+        theme={activeTheme}
+        selectionMode={selectionMode}
+        selected={selectedBookIds.has(book.id)}
+        onSelect={toggleBookSelection}
+        onStartSelection={startSelection}
+      />
+    ),
+    [activeTheme, selectedBookIds, selectionMode, startSelection, toggleBookSelection]
+  );
+
+  const listHeader = (
+    <View style={styles.libraryListHeader}>
+      <View style={styles.topAppBar}>
+        <View style={styles.brandRow}>
+          <M3Pressable
+            captureTouches
+            onPress={() => setMenuOpen(true)}
+            feedback="subtle"
+            hitSlop={8}
+            accessibilityLabel="打开菜单"
+            style={[styles.brandMenuButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+            <BrandSeal />
+          </M3Pressable>
+          <View style={styles.heroText}>
+            <Text numberOfLines={1} style={[styles.brandTitle, { color: ambientTextColor }]}>
+              墨屿
+            </Text>
+            <Text numberOfLines={1} style={[styles.brandSubtitle, { color: ambientMutedColor }]}>
+              INBOX
+            </Text>
           </View>
         </View>
+        <IconButton
+          icon="magnifyingglass"
+          label="搜索书架"
+          tone="quiet"
+          tintColor={theme.text}
+          size="icon"
+          style={[styles.searchIconButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}
+          onPress={openSearch}
+        />
+      </View>
+
+      <View style={styles.libraryHero}>
+        <Image source={appThemeAssets[activeTheme].materialBoard} contentFit="cover" transition={220} style={styles.heroMaterialBoard} />
+        <View style={styles.heroTint} />
+        <View style={styles.libraryHeroTop}>
+          <View style={styles.heroCopyBlock}>
+            <Text style={styles.eyebrow}>PRIVATE LIBRARY</Text>
+            <Text style={styles.heroTitle}>私人书架{'\n'}安静长读</Text>
+          </View>
+        </View>
+      </View>
 
       {notice && (
         <Animated.View entering={m3Motion.fadeDown()} exiting={m3Motion.fadeShortOut()} style={styles.notice}>
@@ -388,40 +401,47 @@ export default function LibraryScreen() {
           );
         })}
       </View>
+    </View>
+  );
 
-      {loading && books.length === 0 ? (
-        <M3StatePanel theme={theme} title="正在整理书架" artwork={<ActivityIndicator color={theme.accent} />} />
-      ) : filteredBooks.length === 0 ? (
-        <M3StatePanel
-          theme={theme}
-          title={filter === 'all' ? '导入第一本书' : '这里还没有书'}
-          body="支持 EPUB 与 TXT。"
-          artwork={<BrandSeal />}
-          order={1}>
-          {filter === 'all' && (
-            <View style={styles.emptyCapabilityRow}>
-              <EmptyCapability theme={activeTheme} label="EPUB" />
-              <EmptyCapability theme={activeTheme} label="TXT" />
-            </View>
-          )}
-        </M3StatePanel>
-      ) : (
-        <View style={styles.shelfList}>
-          {filteredBooks.map((book, index) => (
-            <LibraryBookRow
-              key={book.id}
-              book={book}
-              index={index}
-              theme={activeTheme}
-              selectionMode={selectionMode}
-              selected={selectedBookIds.has(book.id)}
-              onSelect={toggleBookSelection}
-              onStartSelection={startSelection}
-            />
-          ))}
+  const emptyList = loading && books.length === 0 ? (
+    <M3StatePanel theme={theme} title="正在整理书架" artwork={<ActivityIndicator color={theme.accent} />} />
+  ) : (
+    <M3StatePanel
+      theme={theme}
+      title={filter === 'all' ? '导入第一本书' : '这里还没有书'}
+      body="支持 EPUB 与 TXT。"
+      artwork={<BrandSeal />}
+      order={1}>
+      {filter === 'all' && (
+        <View style={styles.emptyCapabilityRow}>
+          <EmptyCapability theme={activeTheme} label="EPUB" />
+          <EmptyCapability theme={activeTheme} label="TXT" />
         </View>
       )}
-      </ScrollView>
+    </M3StatePanel>
+  );
+
+  return (
+    <M3Screen
+      key={`library-screen-${activeTheme}`}
+      theme={theme}
+      backgroundSource={appThemeAssets[activeTheme].background}
+      overlayColor={isDeepTheme ? 'rgba(5, 6, 8, 0.58)' : 'rgba(248, 245, 238, 0.76)'}>
+      <FlashList
+        style={styles.scroller}
+        data={filteredBooks}
+        renderItem={renderBook}
+        keyExtractor={(book) => book.id}
+        extraData={listExtraData}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={emptyList}
+        ItemSeparatorComponent={BookSeparator}
+        contentInsetAdjustmentBehavior="automatic"
+        refreshing={loading && books.length > 0}
+        onRefresh={refresh}
+        contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}
+      />
       {!selectionMode && (
         <M3Pressable
           onPress={handleImport}
@@ -544,12 +564,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 44,
     paddingBottom: 204,
-    gap: 22,
   },
   contentWide: {
     width: '100%',
     maxWidth: 820,
     alignSelf: 'center',
+  },
+  libraryListHeader: {
+    gap: 22,
+    marginBottom: 22,
   },
   topAppBar: {
     flexDirection: 'row',
@@ -898,8 +921,8 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: -12,
   },
-  shelfList: {
-    gap: 12,
+  bookSeparator: {
+    height: 12,
   },
   emptyCapabilityRow: {
     flexDirection: 'row',

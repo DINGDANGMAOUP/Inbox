@@ -43,6 +43,7 @@ export function IconButton({ icon, label, tintColor, tone = 'dark', size = 'regu
         </Text>
       )}
       <M3Pressable
+        captureTouches
         accessibilityLabel={label}
         disabled={disabled}
         feedback={size === 'extended' ? 'standard' : 'subtle'}
