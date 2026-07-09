@@ -32,12 +32,17 @@ export type InboxReaderTapEvent = {
 
 export type InboxReaderDecorationPressEvent = {
   id: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 };
 
 export type InboxReaderDecoration = {
   id: string;
   locator: string;
   type?: 'highlight' | 'note' | 'bookmark';
+  label?: string;
 };
 
 export type InboxReaderSelection = {

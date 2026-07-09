@@ -30,7 +30,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
@@ -39,6 +38,7 @@ import org.readium.r2.navigator.epub.EpubDefaults
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
+import org.readium.r2.navigator.html.HtmlDecorationTemplate
 import org.readium.r2.navigator.html.HtmlDecorationTemplates
 import org.readium.r2.navigator.input.DragEvent
 import org.readium.r2.navigator.input.InputListener
@@ -67,6 +67,127 @@ import java.io.File
 
 private const val TAG = "InboxReader"
 private const val DECORATION_GROUP = "inbox-reader"
+
+private fun inboxDecorationTemplates(): HtmlDecorationTemplates =
+  HtmlDecorationTemplates.defaultTemplates(
+    Color.parseColor("#F6D46A"),
+    4,
+    4,
+    0.72
+  ).apply {
+    set(
+      Decoration.Style.Highlight::class,
+      HtmlDecorationTemplate(
+        HtmlDecorationTemplate.Layout.BOXES,
+        HtmlDecorationTemplate.Width.WRAP,
+        { inboxHighlightElement() },
+        null
+      )
+    )
+    set(
+      Decoration.Style.Underline::class,
+      HtmlDecorationTemplate(
+        HtmlDecorationTemplate.Layout.BOUNDS,
+        HtmlDecorationTemplate.Width.WRAP,
+        { decoration -> inboxUnderlineElement(decoration) },
+        null
+      )
+    )
+  }
+
+private fun inboxHighlightElement(): String =
+  "<div data-activable=\"1\" style=\"position:relative;width:100%;height:100%;box-sizing:border-box;overflow:visible;\"><div style=\"position:absolute;left:0;right:0;bottom:-.28em;border-bottom:2px solid rgba(47,107,79,.82);\"></div></div>"
+
+private fun inboxUnderlineElement(decoration: Decoration): String {
+  val type = decoration.extras["type"] as? String
+  if (type != "note") {
+    return "<div data-activable=\"1\" style=\"position:relative;width:100%;height:100%;box-sizing:border-box;overflow:visible;\"><div style=\"position:absolute;left:0;right:0;bottom:-.3em;border-bottom:2px dotted rgba(96,122,190,.95);\"></div></div>"
+  }
+
+  val label = decoration.extras["label"] as? String ?: "1"
+  return "<div data-activable=\"1\" style=\"position:relative;width:100%;height:100%;box-sizing:border-box;overflow:visible;\"><span data-activable=\"1\" style=\"display:block;position:absolute;left:0;right:0;top:0;bottom:0;\"></span><span data-activable=\"1\" style=\"display:block;position:absolute;right:-.85em;top:-.95em;width:2.35em;height:2.15em;border-radius:999px;\"></span><span style=\"position:absolute;left:0;right:0;bottom:-.16em;border-bottom:2px solid rgba(47,107,79,.46);pointer-events:none;\"></span><span data-activable=\"1\" style=\"position:absolute;right:-.1em;top:-.44em;transform:translateX(45%);display:flex;align-items:center;justify-content:center;min-width:1.25em;height:1.08em;padding:0 .22em;border-radius:999px;background:rgba(47,107,79,.14);border:1px solid rgba(47,107,79,.28);color:rgba(47,107,79,.92);font-size:.48em;font-weight:700;line-height:1;box-shadow:none;pointer-events:none;\">$label</span></div>"
+}
+
+private fun inboxDecorationActivationFallbackScript(): String =
+  """
+  (function() {
+    if (window.__inboxDecorationActivationFallbackInstalled) {
+      return "already-installed";
+    }
+    window.__inboxDecorationActivationFallbackInstalled = true;
+
+    function toPayloadRect(rect) {
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      };
+    }
+
+    function contains(rect, x, y, padding) {
+      return rect && x >= rect.left - padding && x <= rect.right + padding && y >= rect.top - padding && y <= rect.bottom + padding;
+    }
+
+    function collectRects(item) {
+      var rects = [];
+      var elements = item.clickableElements || [];
+      for (var i = 0; i < elements.length; i += 1) {
+        var elementRect = elements[i].getBoundingClientRect();
+        if (elementRect && (elementRect.width > 0 || elementRect.height > 0)) {
+          rects.push({ rect: elementRect, padding: 24 });
+        }
+      }
+      if (item.range && item.range.getBoundingClientRect) {
+        var rangeRect = item.range.getBoundingClientRect();
+        if (rangeRect && (rangeRect.width > 0 || rangeRect.height > 0)) {
+          rects.push({ rect: rangeRect, padding: 30 });
+        }
+      }
+      return rects;
+    }
+
+    document.addEventListener("click", function(event) {
+      try {
+        if (!window.readium || !window.readium.getDecorations || !window.Android || !window.Android.onDecorationActivated) {
+          return;
+        }
+
+        var decorations = window.readium.getDecorations("$DECORATION_GROUP");
+        var items = decorations && decorations.items ? decorations.items.slice().reverse() : [];
+        for (var i = 0; i < items.length; i += 1) {
+          var item = items[i];
+          if (!item || !item.decoration || !item.decoration.id) {
+            continue;
+          }
+
+          var rects = collectRects(item);
+          for (var j = 0; j < rects.length; j += 1) {
+            if (contains(rects[j].rect, event.clientX, event.clientY, rects[j].padding)) {
+              var itemRect = item.range && item.range.getBoundingClientRect ? item.range.getBoundingClientRect() : rects[j].rect;
+              window.Android.onDecorationActivated(JSON.stringify({
+                id: item.decoration.id,
+                group: "$DECORATION_GROUP",
+                rect: toPayloadRect(itemRect),
+                click: { x: event.clientX, y: event.clientY }
+              }));
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        if (window.console && window.console.warn) {
+          window.console.warn("Inbox decoration fallback failed", error);
+        }
+      }
+    }, true);
+    return "installed";
+  })();
+  """.trimIndent()
 
 @OptIn(ExperimentalReadiumApi::class)
 class InboxReaderModule : Module() {
@@ -269,7 +390,7 @@ class InboxReaderView(context: Context, appContext: AppContext) : ExpoView(conte
       it.onError = { emitError(it) }
       it.onExternalLink = { url -> onExternalLink(mapOf<String, Any>("url" to url.toString())) }
       it.onTap = { zone, x, y -> onTap(mapOf<String, Any>("zone" to zone, "x" to x, "y" to y)) }
-      it.onDecorationActivated = { id -> onDecorationPress(mapOf<String, Any>("id" to id)) }
+      it.onDecorationActivated = { payload -> onDecorationPress(payload) }
       it.onSelectionChange = { selection ->
         onSelectionChange(selection ?: mapOf<String, Any>("selectedText" to ""))
       }
@@ -330,7 +451,7 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
   var onLocationChange: (Locator) -> Unit = {}
   var onSelectionChange: (Map<String, Any>?) -> Unit = {}
   var onTap: (String, Float, Float) -> Unit = { _, _, _ -> }
-  var onDecorationActivated: (String) -> Unit = {}
+  var onDecorationActivated: (Map<String, Any>) -> Unit = {}
 
   private var navigator: EpubNavigatorFragment? = null
   private var containerId: Int = View.NO_ID
@@ -341,7 +462,16 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
   private var latestLocatorHref: String? = null
   private val decorationListener = object : DecorableNavigator.Listener {
     override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
-      this@InboxReadiumFragment.onDecorationActivated(event.decoration.id)
+      if (BuildConfig.DEBUG) {
+        Log.d(TAG, "Decoration activated id=${event.decoration.id}")
+      }
+      val payload = mutableMapOf<String, Any>("id" to event.decoration.id)
+      val rect = event.rect
+      payload["x"] = event.point?.x?.toDouble() ?: rect?.centerX()?.toDouble() ?: 0.0
+      payload["y"] = event.point?.y?.toDouble() ?: rect?.centerY()?.toDouble() ?: 0.0
+      payload["width"] = rect?.width()?.toDouble() ?: 0.0
+      payload["height"] = rect?.height()?.toDouble() ?: 0.0
+      this@InboxReadiumFragment.onDecorationActivated(payload)
       return true
     }
   }
@@ -367,12 +497,7 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
           initialPreferences = initialPreferences,
           listener = this,
           configuration = EpubNavigatorFragment.Configuration(
-            decorationTemplates = HtmlDecorationTemplates.defaultTemplates(
-              Color.parseColor("#F6D46A"),
-              4,
-              4,
-              0.72
-            ),
+            decorationTemplates = inboxDecorationTemplates(),
             selectionActionModeCallback = object : BaseActionModeCallback() {
               override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
                 syncSelectionLater(80)
@@ -574,9 +699,10 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
           delay(retryDelay)
         }
         runCatching {
-          val result = currentNavigator.evaluateJavascript(readiumDecorationScript(decorations))
+          currentNavigator.applyDecorations(decorations, DECORATION_GROUP)
+          currentNavigator.evaluateJavascript(inboxDecorationActivationFallbackScript())
           if (BuildConfig.DEBUG && retryDelay == 700L) {
-            Log.d(TAG, "Inbox decorations $result")
+            Log.d(TAG, "Inbox decorations applied count=${decorations.size}")
           }
         }.onFailure {
           Log.d(TAG, "Decoration apply deferred: ${it.message}")
@@ -604,58 +730,19 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
 
 private fun Map<String, Any?>.toDecoration(): Decoration? {
   val id = this["id"] as? String ?: return null
+  val type = this["type"] as? String ?: "highlight"
+  val label = (this["label"] as? String)
+    ?.filter { it.isDigit() || it == '+' }
+    ?.take(3)
+    ?.ifBlank { null }
   val locator = (this["locator"] as? String)
     ?.let { raw -> runCatching { Locator.fromJSON(JSONObject(raw)) }.getOrNull() }
     ?: return null
-  val style = when (this["type"] as? String) {
-    "note" -> Decoration.Style.Underline(Color.parseColor("#8FB8FF"), true)
+  val style = when (type) {
+    "note" -> Decoration.Style.Underline(Color.parseColor("#2F6B4F"), true)
     else -> Decoration.Style.Highlight(Color.parseColor("#F6D46A"), true)
   }
-  return Decoration(id, locator, style, emptyMap())
-}
-
-private fun readiumDecorationScript(decorations: List<Decoration>): String {
-  val payload = JSONArray().apply {
-    decorations.forEach { decoration ->
-      val styleName = when (decoration.style) {
-        is Decoration.Style.Underline -> "inboxUnderline"
-        else -> "inboxHighlight"
-      }
-      val element = when (decoration.style) {
-        is Decoration.Style.Underline ->
-          "<div style=\"position:relative;width:100%;height:100%;box-sizing:border-box;overflow:visible;\"><div style=\"position:absolute;left:0;right:0;bottom:-.3em;border-bottom:2px dotted rgba(96,122,190,.95);\"></div></div>"
-        else ->
-          "<div style=\"position:relative;width:100%;height:100%;box-sizing:border-box;overflow:visible;\"><div style=\"position:absolute;left:0;right:0;bottom:-.28em;border-bottom:2px solid rgba(47,107,79,.82);\"></div></div>"
-      }
-      put(
-        JSONObject()
-          .put("id", decoration.id)
-          .put("locator", decoration.locator.toJSON())
-          .put("style", styleName)
-          .put("element", element)
-      )
-    }
-  }.toString()
-  val group = JSONObject.quote(DECORATION_GROUP)
-
-  return """
-    (function(decorations) {
-      if (!window.readium || !readium.getDecorations || !readium.registerDecorationTemplates) {
-        return JSON.stringify({ items: -1, missingReadium: true });
-      }
-      readium.registerDecorationTemplates({
-        inboxHighlight: { layout: "boxes", width: "wrap" },
-        inboxUnderline: { layout: "boxes", width: "wrap" }
-      });
-      var group = readium.getDecorations($group);
-      group.clear();
-      decorations.forEach(function(decoration) {
-        group.add(decoration);
-      });
-      group.requestLayout();
-      return JSON.stringify({ items: group.items.length });
-    })($payload);
-  """.trimIndent()
+  return Decoration(id, locator, style, mapOf("type" to type, "label" to (label ?: "1")))
 }
 
 private fun List<Decoration>.debugSummary(): String =

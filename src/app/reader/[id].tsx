@@ -8,9 +8,12 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  KeyboardAvoidingView,
   Keyboard,
   Linking,
+  PanResponder,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -55,6 +58,13 @@ type TextSelection = {
   y: number;
   height?: number;
   locator?: string;
+};
+type NoteAnchor = {
+  key: string;
+  locator: string;
+  selectedText: string;
+  chapterId: string;
+  annotations: Annotation[];
 };
 type PendingReadiumNavigation = {
   index: number;
@@ -113,6 +123,19 @@ function parseAnnotationPosition(position: string) {
   } catch {
     return {};
   }
+}
+
+function hashAnnotationAnchor(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function noteAnchorKey(annotation: Annotation) {
+  const position = parseAnnotationPosition(annotation.position);
+  return `note-anchor-${annotation.chapterId}-${hashAnnotationAnchor(`${position.locator ?? position.offset ?? ''}|${annotation.selectedText ?? ''}`)}`;
 }
 
 function ratioFromOffset(chapter: Chapter | undefined, offset?: number) {
@@ -445,6 +468,9 @@ export default function ReaderScreen() {
   const [noteDraft, setNoteDraft] = useState('');
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null);
   const [noteSelection, setNoteSelection] = useState<TextSelection | null>(null);
+  const [activeNoteAnchorKey, setActiveNoteAnchorKey] = useState<string | null>(null);
+  const [activeNoteAnchorPoint, setActiveNoteAnchorPoint] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [noteWindowOffset, setNoteWindowOffset] = useState({ x: 0, y: 0 });
   const [loading, setLoading] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -499,13 +525,126 @@ export default function ReaderScreen() {
 
     return annotations.filter((annotation) => annotation.type === annotationFilter);
   }, [annotationFilter, annotations]);
+  const noteAnchors = useMemo<NoteAnchor[]>(() => {
+    if (!useNativeReadium) {
+      return [];
+    }
+
+    const anchors = new Map<string, NoteAnchor>();
+    for (const annotation of annotations) {
+      if (annotation.type !== 'note' || !annotation.selectedText) {
+        continue;
+      }
+
+      const fallbackChapter = annotation.chapterId === currentChapter?.id ? currentChapter : undefined;
+      const locator = readiumLocatorForAnnotation(annotation, fallbackChapter);
+      if (!locator) {
+        continue;
+      }
+
+      const key = noteAnchorKey(annotation);
+      const anchor = anchors.get(key);
+      if (anchor) {
+        anchor.annotations.push(annotation);
+      } else {
+        anchors.set(key, {
+          key,
+          locator,
+          selectedText: annotation.selectedText,
+          chapterId: annotation.chapterId,
+          annotations: [annotation],
+        });
+      }
+    }
+
+    return Array.from(anchors.values()).map((anchor) => ({
+      ...anchor,
+      annotations: anchor.annotations.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    }));
+  }, [annotations, currentChapter, useNativeReadium]);
+  const activeNoteAnchor = useMemo(
+    () => noteAnchors.find((anchor) => anchor.key === activeNoteAnchorKey) ?? null,
+    [activeNoteAnchorKey, noteAnchors]
+  );
+  const notePopoverStyle = useMemo(() => {
+    const width = Math.min(360, Math.max(280, windowWidth - 28));
+    const anchorX = activeNoteAnchorPoint?.x ?? windowWidth / 2;
+    const anchorY = activeNoteAnchorPoint?.y ?? Math.min(windowHeight * 0.34, 320);
+    const anchorHeight = activeNoteAnchorPoint?.height ?? 20;
+    const topLimit = Math.max(insets.top + 12, 72);
+    const bottomLimit = windowHeight - insets.bottom - 16;
+    const estimatedHeight = Math.min(330, windowHeight * 0.46);
+    const belowTop = anchorY + anchorHeight + 12;
+    const top =
+      belowTop + estimatedHeight <= bottomLimit
+        ? belowTop
+        : Math.max(topLimit, anchorY - estimatedHeight - 12);
+
+    return {
+      left: Math.min(windowWidth - width - 14, Math.max(14, anchorX - width / 2)),
+      maxHeight: Math.max(220, Math.min(380, bottomLimit - top)),
+      top,
+      width,
+    };
+  }, [activeNoteAnchorPoint, insets.bottom, insets.top, windowHeight, windowWidth]);
+  const noteWindowBounds = useMemo(() => {
+    const margin = 14;
+    if (activeNoteAnchor) {
+      const height = Math.min(notePopoverStyle.maxHeight, 330);
+      return {
+        maxX: windowWidth - notePopoverStyle.left - notePopoverStyle.width - margin,
+        maxY: windowHeight - insets.bottom - notePopoverStyle.top - height - margin,
+        minX: margin - notePopoverStyle.left,
+        minY: Math.max(insets.top + margin, 64) - notePopoverStyle.top,
+      };
+    }
+
+    const width = Math.min(520, Math.max(0, windowWidth - 24));
+    const left = (windowWidth - width) / 2;
+    return {
+      maxX: windowWidth - left - width - 12,
+      maxY: 0,
+      minX: 12 - left,
+      minY: -windowHeight * 0.48,
+    };
+  }, [activeNoteAnchor, insets.bottom, insets.top, notePopoverStyle.left, notePopoverStyle.maxHeight, notePopoverStyle.top, notePopoverStyle.width, windowHeight, windowWidth]);
+  const clampNoteWindowOffset = useCallback(
+    (x: number, y: number) => ({
+      x: Math.min(noteWindowBounds.maxX, Math.max(noteWindowBounds.minX, x)),
+      y: Math.min(noteWindowBounds.maxY, Math.max(noteWindowBounds.minY, y)),
+    }),
+    [noteWindowBounds.maxX, noteWindowBounds.maxY, noteWindowBounds.minX, noteWindowBounds.minY]
+  );
+  const resetNoteWindowOffset = useCallback(() => {
+    setNoteWindowOffset({ x: 0, y: 0 });
+  }, []);
+  const noteWindowPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
+        onPanResponderMove: (_event, gesture) => {
+          setNoteWindowOffset(clampNoteWindowOffset(noteWindowOffset.x + gesture.dx, noteWindowOffset.y + gesture.dy));
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          setNoteWindowOffset(clampNoteWindowOffset(noteWindowOffset.x + gesture.dx, noteWindowOffset.y + gesture.dy));
+        },
+        onPanResponderTerminate: (_event, gesture) => {
+          setNoteWindowOffset(clampNoteWindowOffset(noteWindowOffset.x + gesture.dx, noteWindowOffset.y + gesture.dy));
+        },
+      }),
+    [clampNoteWindowOffset, noteWindowOffset.x, noteWindowOffset.y]
+  );
+  const noteWindowDragStyle = useMemo(
+    () => ({ transform: [{ translateX: noteWindowOffset.x }, { translateY: noteWindowOffset.y }] }),
+    [noteWindowOffset.x, noteWindowOffset.y]
+  );
   const readiumDecorations = useMemo<InboxReaderDecoration[]>(() => {
     if (!useNativeReadium) {
       return [];
     }
 
-    return annotations.flatMap((annotation) => {
-      if ((annotation.type !== 'highlight' && annotation.type !== 'note') || !annotation.selectedText) {
+    const highlights = annotations.flatMap((annotation) => {
+      if (annotation.type !== 'highlight' || !annotation.selectedText) {
         return [];
       }
 
@@ -517,7 +656,15 @@ export default function ReaderScreen() {
 
       return [{ id: annotation.id, locator, type: annotation.type }];
     });
-  }, [annotations, currentChapter, useNativeReadium]);
+    const noteBadges = noteAnchors.map((anchor) => ({
+      id: anchor.key,
+      locator: anchor.locator,
+      type: 'note' as const,
+      label: anchor.annotations.length > 99 ? '99+' : String(anchor.annotations.length),
+    }));
+
+    return [...highlights, ...noteBadges];
+  }, [annotations, currentChapter, noteAnchors, useNativeReadium]);
   const annotationCounts = useMemo(() => {
     return annotations.reduce(
       (counts, annotation) => {
@@ -560,7 +707,17 @@ export default function ReaderScreen() {
     setPanel(null);
     setTextSelection(null);
     setNoteSelection(null);
-  }, []);
+    setActiveNoteAnchorKey(null);
+    resetNoteWindowOffset();
+  }, [resetNoteWindowOffset]);
+
+  const dismissSelectionNote = useCallback(() => {
+    Keyboard.dismiss();
+    setNoteDraft('');
+    setNoteSelection(null);
+    setActiveNoteAnchorKey(null);
+    resetNoteWindowOffset();
+  }, [resetNoteWindowOffset]);
 
   const showNotice = useCallback((message: string) => {
     if (noticeTimer.current) {
@@ -683,6 +840,16 @@ export default function ReaderScreen() {
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (activeNoteAnchorKey) {
+        setActiveNoteAnchorKey(null);
+        return true;
+      }
+
+      if (noteSelection) {
+        dismissSelectionNote();
+        return true;
+      }
+
       if (panel) {
         closePanel();
         return true;
@@ -693,7 +860,7 @@ export default function ReaderScreen() {
     });
 
     return () => subscription.remove();
-  }, [closePanel, flushProgress, panel]);
+  }, [activeNoteAnchorKey, closePanel, dismissSelectionNote, flushProgress, noteSelection, panel]);
 
   useEffect(() => {
     let cancelled = false;
@@ -762,6 +929,7 @@ export default function ReaderScreen() {
         setPanel(null);
         setTextSelection(null);
         setNoteSelection(null);
+        setActiveNoteAnchorKey(null);
         latestProgressRatio.current = targetRatio;
         void saveProgress(db, book.id, nextChapter.id, targetRatio);
         return;
@@ -772,6 +940,7 @@ export default function ReaderScreen() {
       setPanel(null);
       setTextSelection(null);
       setNoteSelection(null);
+      setActiveNoteAnchorKey(null);
       latestProgressRatio.current = targetRatio;
       void saveProgress(db, book.id, nextChapter.id, targetRatio);
     },
@@ -800,6 +969,7 @@ export default function ReaderScreen() {
         setPanel(null);
         setTextSelection(null);
         setNoteSelection(null);
+        setActiveNoteAnchorKey(null);
       }
       latestProgressRatio.current = ratio;
       if (nextIndex !== currentIndex) {
@@ -818,7 +988,17 @@ export default function ReaderScreen() {
 
   const handleReadiumTap = useCallback(
     (event: { nativeEvent: InboxReaderTapEvent }) => {
-      if (chromeVisible || panel || textSelection || noteSelection) {
+      if (activeNoteAnchorKey) {
+        setActiveNoteAnchorKey(null);
+        setChromeVisible(false);
+        return;
+      }
+      if (noteSelection) {
+        dismissSelectionNote();
+        setChromeVisible(false);
+        return;
+      }
+      if (chromeVisible || panel || textSelection) {
         closePanel();
         setChromeVisible(false);
         return;
@@ -833,11 +1013,28 @@ export default function ReaderScreen() {
       }
       setChromeVisible((visible) => !visible);
     },
-    [chromeVisible, closePanel, noteSelection, panel, textSelection]
+    [activeNoteAnchorKey, chromeVisible, closePanel, dismissSelectionNote, noteSelection, panel, textSelection]
   );
 
   const handleReadiumDecorationPress = useCallback(
     (event: { nativeEvent: InboxReaderDecorationPressEvent }) => {
+      const noteAnchor = noteAnchors.find((anchor) => anchor.key === event.nativeEvent.id);
+      if (noteAnchor) {
+        setTextSelection(null);
+        setNoteSelection(null);
+        setPanel(null);
+        setChromeVisible(false);
+        setActiveNoteAnchorPoint({
+          height: typeof event.nativeEvent.height === 'number' ? event.nativeEvent.height : 20,
+          width: typeof event.nativeEvent.width === 'number' ? event.nativeEvent.width : 20,
+          x: typeof event.nativeEvent.x === 'number' ? event.nativeEvent.x : windowWidth / 2,
+          y: typeof event.nativeEvent.y === 'number' ? event.nativeEvent.y : Math.min(windowHeight * 0.34, 320),
+        });
+        resetNoteWindowOffset();
+        setActiveNoteAnchorKey(noteAnchor.key);
+        return;
+      }
+
       const annotation = annotations.find((item) => item.id === event.nativeEvent.id);
       if (!annotation) {
         return;
@@ -849,7 +1046,7 @@ export default function ReaderScreen() {
       setPanel('notes');
       setChromeVisible(true);
     },
-    [annotations]
+    [annotations, noteAnchors, resetNoteWindowOffset, windowHeight, windowWidth]
   );
 
   const handleReadiumExternalLink = useCallback(
@@ -980,78 +1177,6 @@ export default function ReaderScreen() {
     [book, chapterCache, chapters, db, goToChapter, showNotice, useNativeReadium]
   );
 
-  const readCurrentReadiumSelection = useCallback(async () => {
-    let selection: InboxReaderSelection | null | undefined;
-    const getCurrentSelection = nativeReaderRef.current?.getCurrentSelection;
-    if (typeof getCurrentSelection !== 'function') {
-      showNotice('重新打开阅读器后再试');
-      return null;
-    }
-
-    try {
-      selection = await getCurrentSelection();
-    } catch {
-      selection = null;
-    }
-
-    const selectedText = selection?.selectedText?.trim();
-    if (!selection?.locator || !selectedText) {
-      showNotice('先选中正文中的文字');
-      return null;
-    }
-
-    return {
-      selectedText,
-      offset: 0,
-      x: typeof selection.x === 'number' ? selection.x : windowWidth / 2,
-      y: typeof selection.y === 'number' ? selection.y : windowHeight / 2,
-      locator: selection.locator,
-    };
-  }, [showNotice, windowHeight, windowWidth]);
-
-  const saveReadiumSelectionHighlight = useCallback(async () => {
-    if (!book) {
-      return;
-    }
-
-    const selection = await readCurrentReadiumSelection();
-    if (!selection?.locator) {
-      return;
-    }
-
-    const target = chapterFromReadiumLocator(chapters, selection.locator);
-    const targetChapter = target?.chapter ?? currentChapterMeta;
-    if (!targetChapter) {
-      showNotice('没有找到选区章节');
-      return;
-    }
-
-    await createAnnotation(db, {
-      bookId: book.id,
-      chapterId: targetChapter.id,
-      type: 'highlight',
-      selectedText: selection.selectedText,
-      color: '#f6d46a',
-      position: JSON.stringify({ locator: selection.locator, quote: selection.selectedText.slice(0, 140) }),
-    });
-    await nativeReaderRef.current?.clearSelection?.();
-    setAnnotations(await listAnnotations(db, book.id));
-    showNotice('已保存划线');
-  }, [book, chapters, currentChapterMeta, db, readCurrentReadiumSelection, showNotice]);
-
-  const startReadiumSelectionNote = useCallback(async () => {
-    const selection = await readCurrentReadiumSelection();
-    if (!selection) {
-      return;
-    }
-
-    setNoteSelection(selection);
-    setNoteDraft('');
-    await nativeReaderRef.current?.clearSelection?.();
-    setPanel('notes');
-    setChromeVisible(true);
-  }, [readCurrentReadiumSelection]);
-
   const copySelectedText = useCallback(async () => {
     if (!textSelection) {
       return;
@@ -1095,9 +1220,10 @@ export default function ReaderScreen() {
     setNoteDraft('');
     setTextSelection(null);
     await nativeReaderRef.current?.clearSelection?.();
-    setPanel('notes');
-    setChromeVisible(true);
-  }, [textSelection]);
+    setPanel(null);
+    setChromeVisible(false);
+    resetNoteWindowOffset();
+  }, [resetNoteWindowOffset, textSelection]);
 
   const initialReadiumLocator = useMemo(
     () => (currentChapterMeta ? readiumLocatorForChapter(currentChapterMeta, restoreRatio) : null),
@@ -1124,12 +1250,39 @@ export default function ReaderScreen() {
           : { chapterId: currentChapterMeta.id }
       ),
     });
+    const wasSelectionNote = Boolean(noteSelection);
     setNoteDraft('');
     setNoteSelection(null);
+    Keyboard.dismiss();
     setAnnotations(await listAnnotations(db, book.id));
     showNotice('笔记已保存');
+    if (wasSelectionNote) {
+      setPanel(null);
+      setChromeVisible(false);
+      return;
+    }
     setPanel('notes');
   }, [book, chapters, currentChapterMeta, db, noteDraft, noteSelection, showNotice]);
+
+  const startNoteForActiveAnchor = useCallback(() => {
+    if (!activeNoteAnchor) {
+      return;
+    }
+
+    setNoteSelection({
+      selectedText: activeNoteAnchor.selectedText,
+      offset: 0,
+      x: windowWidth / 2,
+      y: windowHeight / 2,
+      locator: activeNoteAnchor.locator,
+    });
+    setNoteDraft('');
+    setActiveNoteAnchorKey(null);
+    setActiveNoteAnchorPoint(null);
+    setPanel(null);
+    setChromeVisible(false);
+    resetNoteWindowOffset();
+  }, [activeNoteAnchor, resetNoteWindowOffset, windowHeight, windowWidth]);
 
   const addBookmark = useCallback(async () => {
     if (!book || !currentChapterMeta) {
@@ -1248,20 +1401,20 @@ export default function ReaderScreen() {
         <Animated.View
           entering={reduceMotion ? FadeIn.duration(80) : FadeIn.duration(120)}
           exiting={reduceMotion ? FadeOut.duration(80) : FadeOut.duration(90)}
-          style={[styles.selectionToolbar, selectionMenuStyle, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
+          style={[styles.selectionToolbar, selectionMenuStyle, { backgroundColor: readerTheme.surfaceSolid, borderColor: readerTheme.line }]}>
           <M3Pressable captureTouches onPress={copySelectedText} feedback="subtle" accessibilityLabel="复制选中内容" style={styles.selectionToolButton}>
-            <MaterialSymbol name="copy" color={chromeTheme.accent} description="复制" decorative size={17} />
-            <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>复制</Text>
+            <MaterialSymbol name="copy" color={readerTheme.accent} description="复制" decorative size={17} />
+            <Text style={[styles.selectionToolText, { color: readerTheme.text }]}>复制</Text>
           </M3Pressable>
-          <View style={[styles.selectionToolDivider, { backgroundColor: chromeTheme.controlBorder }]} />
+          <View style={[styles.selectionToolDivider, { backgroundColor: readerTheme.line }]} />
           <M3Pressable captureTouches onPress={saveSelectedHighlight} feedback="subtle" accessibilityLabel="保存划线" style={styles.selectionToolButton}>
-            <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="划线" decorative size={17} />
-            <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>划线</Text>
+            <MaterialSymbol name="highlighter" color={readerTheme.accent} description="划线" decorative size={17} />
+            <Text style={[styles.selectionToolText, { color: readerTheme.text }]}>划线</Text>
           </M3Pressable>
-          <View style={[styles.selectionToolDivider, { backgroundColor: chromeTheme.controlBorder }]} />
+          <View style={[styles.selectionToolDivider, { backgroundColor: readerTheme.line }]} />
           <M3Pressable captureTouches onPress={startSelectionNote} feedback="subtle" accessibilityLabel="添加笔记" style={styles.selectionToolButton}>
-            <MaterialSymbol name="note" color={chromeTheme.accent} description="笔记" decorative size={17} />
-            <Text style={[styles.selectionToolText, { color: chromeTheme.text }]}>笔记</Text>
+            <MaterialSymbol name="note" color={readerTheme.accent} description="笔记" decorative size={17} />
+            <Text style={[styles.selectionToolText, { color: readerTheme.text }]}>笔记</Text>
           </M3Pressable>
         </Animated.View>
       )}
@@ -1485,47 +1638,11 @@ export default function ReaderScreen() {
                       {currentBookmark ? '已标记当前章' : '收藏当前位置'}
                     </Text>
                   </M3Pressable>
-                  {useNativeReadium && (
-                    <>
-                      <M3Pressable
-                        captureTouches
-                        onPress={saveReadiumSelectionHighlight}
-                        feedback="standard"
-                        accessibilityRole="button"
-                        style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-                        <View style={styles.annotationActionHeader}>
-                          <MaterialSymbol name="highlighter" color={chromeTheme.accent} description="选区划线" decorative size={18} />
-                          <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>选区划线</Text>
-                        </View>
-                        <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>保存选中文字</Text>
-                      </M3Pressable>
-                      <M3Pressable
-                        captureTouches
-                        onPress={startReadiumSelectionNote}
-                        feedback="standard"
-                        accessibilityRole="button"
-                        style={[styles.annotationActionCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-                        <View style={styles.annotationActionHeader}>
-                          <MaterialSymbol name="note" color={chromeTheme.accent} description="选区笔记" decorative size={18} />
-                          <Text style={[styles.annotationActionTitle, { color: chromeTheme.text }]}>选区笔记</Text>
-                        </View>
-                        <Text style={[styles.annotationActionBody, { color: chromeTheme.muted }]}>附到原文</Text>
-                      </M3Pressable>
-                    </>
-                  )}
                 </View>
-                {noteSelection && (
-                  <View style={[styles.selectionQuoteCard, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
-                    <Text style={[styles.selectionQuoteLabel, { color: chromeTheme.accent }]}>选中原文</Text>
-                    <Text numberOfLines={3} style={[styles.selectionQuoteText, { color: chromeTheme.text }]}>
-                      {noteSelection.selectedText}
-                    </Text>
-                  </View>
-                )}
                 <TextInput
                   value={noteDraft}
                   onChangeText={setNoteDraft}
-                  placeholder={noteSelection ? '写下这段文字的想法' : '为本章写一条笔记'}
+                  placeholder="为本章写一条笔记"
                   placeholderTextColor={chromeTheme.muted}
                   multiline
                   style={[styles.panelInput, styles.noteInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
@@ -1695,6 +1812,153 @@ export default function ReaderScreen() {
         </Animated.View>
       )}
 
+      {noteSelection && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          pointerEvents="box-none"
+          style={[styles.noteComposerLayer, { paddingBottom: Math.max(12, insets.bottom + 10) }]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="关闭笔记" onPress={dismissSelectionNote} style={styles.noteComposerBackdrop} />
+          <Animated.View
+            entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
+            exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.fadeShortOut()}
+            style={[styles.noteComposerCard, noteWindowDragStyle, { backgroundColor: readerTheme.surfaceSolid, borderColor: readerTheme.line }]}>
+            <View {...noteWindowPanResponder.panHandlers} style={styles.noteComposerHeader}>
+              <View style={styles.noteComposerTitleRow}>
+                <MaterialSymbol name="note" color={readerTheme.accent} description="笔记" decorative size={20} />
+                <Text style={[styles.noteComposerTitle, { color: readerTheme.text }]}>添加笔记</Text>
+              </View>
+              <IconButton
+                icon="close"
+                label="关闭"
+                tone="quiet"
+                size="icon"
+                tintColor={readerTheme.text}
+                onPress={dismissSelectionNote}
+                style={[styles.closeButton, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line }]}
+              />
+            </View>
+            <View style={[styles.selectionQuoteCard, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line }]}>
+              <Text style={[styles.selectionQuoteLabel, { color: readerTheme.accent }]}>选中原文</Text>
+              <Text numberOfLines={4} style={[styles.selectionQuoteText, { color: readerTheme.text }]}>
+                {noteSelection.selectedText}
+              </Text>
+            </View>
+            <TextInput
+              autoFocus
+              value={noteDraft}
+              onChangeText={setNoteDraft}
+              placeholder="写下这段文字的想法"
+              placeholderTextColor={readerTheme.muted}
+              multiline
+              style={[styles.panelInput, styles.noteComposerInput, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line, color: readerTheme.text }]}
+            />
+            <View style={styles.noteComposerActions}>
+              <Pressable
+                onPress={dismissSelectionNote}
+                accessibilityLabel="取消笔记"
+                accessibilityRole="button"
+                hitSlop={6}
+                style={[styles.noteComposerCancelButton, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line }]}>
+                <Text style={[styles.noteComposerCancelText, { color: readerTheme.text }]}>取消</Text>
+              </Pressable>
+              <Pressable
+                onPress={saveNote}
+                disabled={!noteDraft.trim()}
+                accessibilityLabel="保存笔记"
+                accessibilityRole="button"
+                hitSlop={6}
+                style={[styles.noteComposerSaveButton, !noteDraft.trim() && styles.disabledActionButton, { backgroundColor: readerTheme.accent }]}>
+                <Text style={[styles.saveNoteText, { color: readerTheme.accentText }]}>保存</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      )}
+
+      {activeNoteAnchor && (
+        <View pointerEvents="box-none" style={styles.notePopoverLayer}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="关闭笔记列表"
+            pointerEvents="box-only"
+            onPress={() => {
+              setActiveNoteAnchorKey(null);
+              setActiveNoteAnchorPoint(null);
+            }}
+            style={styles.notePopoverBackdrop}
+          />
+          <Animated.View
+            pointerEvents="auto"
+            entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
+            exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.fadeShortOut()}
+            style={[
+              styles.notePopoverCard,
+              notePopoverStyle,
+              noteWindowDragStyle,
+              { backgroundColor: readerTheme.surfaceSolid, borderColor: readerTheme.line },
+            ]}>
+            <View {...noteWindowPanResponder.panHandlers} style={styles.noteComposerHeader}>
+              <View style={styles.noteComposerTitleRow}>
+                <MaterialSymbol name="note" color={readerTheme.accent} description="笔记" decorative size={20} />
+                <Text style={[styles.noteComposerTitle, { color: readerTheme.text }]}>
+                  {activeNoteAnchor.annotations.length} 条笔记
+                </Text>
+              </View>
+              <IconButton
+                icon="close"
+                label="关闭"
+                tone="quiet"
+                size="icon"
+                tintColor={readerTheme.text}
+                onPress={() => {
+                  setActiveNoteAnchorKey(null);
+                  setActiveNoteAnchorPoint(null);
+                }}
+                style={[styles.closeButton, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line }]}
+              />
+            </View>
+            <View style={[styles.selectionQuoteCard, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line }]}>
+              <Text style={[styles.selectionQuoteLabel, { color: readerTheme.accent }]}>原文</Text>
+              <Text numberOfLines={4} style={[styles.selectionQuoteText, { color: readerTheme.text }]}>
+                {activeNoteAnchor.selectedText}
+              </Text>
+            </View>
+            <ScrollView style={styles.noteListScroll} contentContainerStyle={styles.noteListContent}>
+              {activeNoteAnchor.annotations.map((annotation) => (
+                <View key={annotation.id} style={[styles.noteListItem, { borderColor: readerTheme.line }]}>
+                  <Text style={[styles.noteListTime, { color: readerTheme.muted }]}>{formatAnnotationTime(annotation.updatedAt)}</Text>
+                  <Text style={[styles.noteListText, { color: readerTheme.text }]}>{annotation.noteText || annotation.selectedText}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={styles.noteComposerActions}>
+              <Pressable
+                onPress={() => {
+                  setActiveNoteAnchorKey(null);
+                  setActiveNoteAnchorPoint(null);
+                  setAnnotationFilter('note');
+                  setPanel('notes');
+                  setChromeVisible(true);
+                }}
+                accessibilityLabel="查看全部标注"
+                accessibilityRole="button"
+                hitSlop={6}
+                style={[styles.noteComposerCancelButton, { backgroundColor: readerTheme.surfaceContainer, borderColor: readerTheme.line }]}>
+                <Text style={[styles.noteComposerCancelText, { color: readerTheme.text }]}>全部标注</Text>
+              </Pressable>
+              <Pressable
+                onPress={startNoteForActiveAnchor}
+                accessibilityLabel="继续写笔记"
+                accessibilityRole="button"
+                hitSlop={6}
+                style={[styles.noteComposerSaveButton, { backgroundColor: readerTheme.accent }]}>
+                <Text style={[styles.saveNoteText, { color: readerTheme.accentText }]}>写一条</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </View>
+      )}
+
       {notice && (
         <Animated.View
           entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
@@ -1765,6 +2029,155 @@ const styles = StyleSheet.create({
   selectionToolDivider: {
     width: StyleSheet.hairlineWidth,
     height: 24,
+  },
+  noteComposerLayer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 120,
+    elevation: 24,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+    paddingTop: 72,
+  },
+  noteComposerBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(8, 10, 7, 0.12)',
+  },
+  notePopoverLayer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 130,
+    elevation: 28,
+  },
+  notePopoverBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(36, 26, 18, 0.08)',
+    zIndex: 0,
+  },
+  notePopoverCard: {
+    position: 'absolute',
+    zIndex: 1,
+    elevation: 30,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    padding: 12,
+    gap: 9,
+    boxShadow: '0 12px 30px rgba(36, 26, 18, 0.18)',
+  },
+  noteComposerCard: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 520,
+    borderRadius: brand.radius.extraLarge,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    padding: 13,
+    gap: 10,
+    boxShadow: '0 14px 34px rgba(8, 10, 7, 0.20)',
+  },
+  noteListCard: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '52%',
+    borderRadius: brand.radius.extraLarge,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    padding: 13,
+    gap: 10,
+    boxShadow: '0 14px 34px rgba(8, 10, 7, 0.20)',
+  },
+  noteComposerHeader: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  noteComposerTitleRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  noteComposerTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  noteComposerInput: {
+    minHeight: 96,
+    paddingTop: 12,
+    textAlignVertical: 'top',
+  },
+  noteComposerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  noteListScroll: {
+    maxHeight: 220,
+  },
+  noteListContent: {
+    gap: 10,
+    paddingBottom: 2,
+  },
+  noteListItem: {
+    borderTopWidth: 1,
+    paddingTop: 10,
+    gap: 5,
+  },
+  noteListTime: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  noteListText: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  noteComposerCancelButton: {
+    minHeight: 44,
+    borderRadius: brand.radius.round,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteComposerCancelText: {
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  noteComposerSaveButton: {
+    minHeight: 44,
+    minWidth: 72,
+    borderRadius: brand.radius.round,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  disabledActionButton: {
+    opacity: 0.48,
   },
   stateWrap: {
     flex: 1,
@@ -2154,12 +2567,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   selectionQuoteCard: {
-    borderRadius: brand.radius.large,
+    borderRadius: brand.radius.medium,
     borderCurve: 'continuous',
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 5,
+    borderWidth: 0,
+    borderLeftWidth: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
   },
   selectionQuoteLabel: {
     fontSize: 10,
