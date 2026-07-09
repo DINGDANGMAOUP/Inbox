@@ -8,9 +8,13 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  FlatList,
   KeyboardAvoidingView,
   Keyboard,
+  type LayoutChangeEvent,
   Linking,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   PanResponder,
   Platform,
   Pressable,
@@ -114,6 +118,61 @@ function chapterLabel(title: string) {
 
 function bookTitleLabel(title: string) {
   return cleanChapterTitle(title, title || '未命名书籍');
+}
+
+function cleanInlineContent(input: string) {
+  return input
+    .replace(/\\r/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\\?[\w-]*pq[\w.-]*\.(?:bmp|png|jpe?g|gif)\\?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function chapterTitleKey(input: string) {
+  const cleaned = cleanChapterTitle(input, '');
+  if (!cleaned) {
+    return '';
+  }
+
+  return chapterLabel(cleaned)
+    .normalize('NFKC')
+    .replace(/[\s　:：,，.。·\-—_]+/g, '')
+    .toLowerCase();
+}
+
+function shouldShowChapterHeading(title: string, chapterCount: number) {
+  const label = chapterLabel(title);
+  return chapterCount > 1 || !/^(?:正文|未命名文本)$/.test(label);
+}
+
+function isDuplicateChapterHeading(block: string, title: string) {
+  const blockKey = chapterTitleKey(cleanInlineContent(block));
+  const titleKey = chapterTitleKey(title);
+  return Boolean(blockKey && titleKey && blockKey === titleKey);
+}
+
+function readerParagraphs(chapter: Chapter, chapterCount: number) {
+  const showHeading = shouldShowChapterHeading(chapter.title, chapterCount);
+  let checkedOpeningBlock = false;
+
+  return chapter.textContent
+    .replace(/\\r/g, '\n')
+    .replace(/\r/g, '\n')
+    .split(/\n+/)
+    .filter((block) => {
+      if (!showHeading || checkedOpeningBlock) {
+        return true;
+      }
+      if (!cleanInlineContent(block)) {
+        return true;
+      }
+
+      checkedOpeningBlock = true;
+      return !isDuplicateChapterHeading(block, chapter.title);
+    })
+    .map(cleanInlineContent)
+    .filter(Boolean);
 }
 
 function parseAnnotationPosition(position: string) {
@@ -435,12 +494,75 @@ function ReaderToolChip({
   );
 }
 
+function ScrollReaderChapter({
+  chapter,
+  chapterIndex,
+  chapterCount,
+  preferences,
+  readerTheme,
+  onLayout,
+  onPress,
+}: {
+  chapter: Chapter;
+  chapterIndex: number;
+  chapterCount: number;
+  preferences: ReaderPreferences;
+  readerTheme: (typeof brand.readerThemes)[ReaderTheme];
+  onLayout: (event: LayoutChangeEvent) => void;
+  onPress: () => void;
+}) {
+  const loaded = Boolean(chapter.textContent);
+  const paragraphs = useMemo(() => (loaded ? readerParagraphs(chapter, chapterCount) : []), [chapter, chapterCount, loaded]);
+  const showHeading = shouldShowChapterHeading(chapter.title, chapterCount);
+
+  return (
+    <Pressable onPress={onPress} onLayout={onLayout} style={[styles.scrollChapter, { paddingHorizontal: preferences.margin }]}>
+      {showHeading && (
+        <View style={styles.scrollChapterHeading}>
+          <Text style={[styles.scrollChapterKicker, { color: readerTheme.accent }]}>
+            第 {chapterIndex + 1} / {chapterCount} 章
+          </Text>
+          <Text style={[styles.scrollChapterTitle, { color: readerTheme.text }]}>{chapterLabel(chapter.title)}</Text>
+          <View style={[styles.scrollChapterRule, { backgroundColor: readerTheme.line }]} />
+        </View>
+      )}
+      {loaded ? (
+        <View style={styles.scrollParagraphStack}>
+          {paragraphs.map((paragraph, index) => (
+            <Text
+              key={`${chapter.id}-${index}`}
+              selectable
+              style={[
+                styles.scrollParagraph,
+                {
+                  color: readerTheme.text,
+                  fontFamily: readerNativeFontFamily(preferences.fontFamily),
+                  fontSize: preferences.fontSize,
+                  lineHeight: Math.round(preferences.fontSize * preferences.lineHeight),
+                },
+              ]}>
+              {paragraph}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        <View style={[styles.scrollChapterLoading, { borderColor: readerTheme.line }]}>
+          <ActivityIndicator color={readerTheme.accent} />
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 export default function ReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const nativeReaderRef = useRef<InboxReaderViewRef | null>(null);
+  const scrollReaderRef = useRef<FlatList<Chapter> | null>(null);
+  const scrollChapterLayouts = useRef<Record<string, { y: number; height: number }>>({});
+  const pendingScrollNavigation = useRef<{ index: number; ratio: number; animated: boolean } | null>(null);
   const lastProgressSave = useRef(0);
   const latestProgressRatio = useRef(0);
   const latestReadiumLocator = useRef<string | null>(null);
@@ -480,6 +602,8 @@ export default function ReaderScreen() {
   const currentChapterMeta = chapters[currentIndex];
   const currentChapter = currentChapterMeta ? chapterCache[currentChapterMeta.id] : undefined;
   const useNativeReadium = canUseReadium(book);
+  const useContinuousScroll = preferences.readingMode === 'scroll';
+  const useNativePageReader = useNativeReadium && !useContinuousScroll;
   const themeToken = brand.readerThemes[preferences.readerTheme];
   const readerTheme = themeToken;
   const chromePanelSurface = preferences.readerTheme === 'night' ? '#171A18' : brand.chrome.surface;
@@ -527,7 +651,7 @@ export default function ReaderScreen() {
     return annotations.filter((annotation) => annotation.type === annotationFilter);
   }, [annotationFilter, annotations]);
   const noteAnchors = useMemo<NoteAnchor[]>(() => {
-    if (!useNativeReadium) {
+    if (!useNativePageReader) {
       return [];
     }
 
@@ -562,7 +686,7 @@ export default function ReaderScreen() {
       ...anchor,
       annotations: anchor.annotations.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     }));
-  }, [annotations, currentChapter, useNativeReadium]);
+  }, [annotations, currentChapter, useNativePageReader]);
   const activeNoteAnchor = useMemo(
     () => noteAnchors.find((anchor) => anchor.key === activeNoteAnchorKey) ?? null,
     [activeNoteAnchorKey, noteAnchors]
@@ -641,7 +765,7 @@ export default function ReaderScreen() {
   );
   const noteComposerBottomInset = keyboardHeight > 0 ? keyboardHeight + 10 : Math.max(12, insets.bottom + 10);
   const readiumDecorations = useMemo<InboxReaderDecoration[]>(() => {
-    if (!useNativeReadium) {
+    if (!useNativePageReader) {
       return [];
     }
 
@@ -666,7 +790,7 @@ export default function ReaderScreen() {
     }));
 
     return [...highlights, ...noteBadges];
-  }, [annotations, currentChapter, noteAnchors, useNativeReadium]);
+  }, [annotations, currentChapter, noteAnchors, useNativePageReader]);
   const annotationCounts = useMemo(() => {
     return annotations.reduce(
       (counts, annotation) => {
@@ -750,6 +874,7 @@ export default function ReaderScreen() {
     setCurrentIndex(nextIndex);
     setRestoreRatio(progress?.scroll_ratio ?? 0);
     latestProgressRatio.current = progress?.scroll_ratio ?? 0;
+    pendingScrollNavigation.current = { index: nextIndex, ratio: progress?.scroll_ratio ?? 0, animated: false };
     setLoading(false);
   }, [db, id]);
 
@@ -912,6 +1037,84 @@ export default function ReaderScreen() {
 
   useEffect(() => clearPendingReadiumNavigation, [clearPendingReadiumNavigation]);
 
+  const restorePendingScrollNavigation = useCallback(() => {
+    const pending = pendingScrollNavigation.current;
+    if (!pending || preferences.readingMode !== 'scroll') {
+      return;
+    }
+
+    const chapter = chapters[pending.index];
+    const layout = chapter ? scrollChapterLayouts.current[chapter.id] : undefined;
+    if (!layout || !scrollReaderRef.current) {
+      return;
+    }
+
+    const readableHeight = Math.max(0, layout.height - windowHeight * 0.45);
+    scrollReaderRef.current.scrollToOffset({
+      animated: pending.animated,
+      offset: Math.max(0, layout.y + readableHeight * clampRatio(pending.ratio)),
+    });
+    pendingScrollNavigation.current = null;
+  }, [chapters, preferences.readingMode, windowHeight]);
+
+  const handleScrollChapterLayout = useCallback(
+    (chapterId: string, event: LayoutChangeEvent) => {
+      const { y, height } = event.nativeEvent.layout;
+      scrollChapterLayouts.current[chapterId] = { y, height };
+      restorePendingScrollNavigation();
+    },
+    [restorePendingScrollNavigation]
+  );
+
+  const handleScrollReaderScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!book || preferences.readingMode !== 'scroll') {
+        return;
+      }
+
+      const probeY = event.nativeEvent.contentOffset.y + windowHeight * 0.34;
+      let nextIndex = currentIndex;
+      let nextRatio = latestProgressRatio.current;
+
+      for (let index = 0; index < chapters.length; index += 1) {
+        const chapter = chapters[index];
+        const layout = scrollChapterLayouts.current[chapter.id];
+        if (!layout) {
+          continue;
+        }
+        if (probeY >= layout.y && probeY <= layout.y + layout.height) {
+          nextIndex = index;
+          nextRatio = clampRatio((probeY - layout.y) / Math.max(1, layout.height));
+          break;
+        }
+        if (probeY > layout.y + layout.height) {
+          nextIndex = index;
+          nextRatio = 0.96;
+        }
+      }
+
+      const nextChapter = chapters[nextIndex];
+      if (!nextChapter) {
+        return;
+      }
+
+      latestProgressRatio.current = nextRatio;
+      if (nextIndex !== currentIndex) {
+        setCurrentIndex(nextIndex);
+        setRestoreRatio(nextRatio);
+        setPageStatus({ pageIndex: 1, pageCount: 1 });
+      }
+
+      const now = Date.now();
+      if (now - lastProgressSave.current < 1200) {
+        return;
+      }
+      lastProgressSave.current = now;
+      void saveProgress(db, book.id, nextChapter.id, nextRatio);
+    },
+    [book, chapters, currentIndex, db, preferences.readingMode, windowHeight]
+  );
+
   const goToChapter = useCallback(
     async (index: number, ratio = 0) => {
       if (!book || !chapters[index]) {
@@ -919,7 +1122,7 @@ export default function ReaderScreen() {
       }
       const nextChapter = chapters[index];
       const targetRatio = clampRatio(ratio);
-      if (useNativeReadium) {
+      if (useNativePageReader) {
         clearPendingReadiumNavigation();
         const token = Date.now();
         const timeout = setTimeout(() => {
@@ -947,6 +1150,7 @@ export default function ReaderScreen() {
         void saveProgress(db, book.id, nextChapter.id, targetRatio);
         return;
       }
+      pendingScrollNavigation.current = { index, ratio: targetRatio, animated: false };
       setCurrentIndex(index);
       setRestoreRatio(targetRatio);
       setPageStatus({ pageIndex: 1, pageCount: 1 });
@@ -956,8 +1160,9 @@ export default function ReaderScreen() {
       setActiveNoteAnchorKey(null);
       latestProgressRatio.current = targetRatio;
       void saveProgress(db, book.id, nextChapter.id, targetRatio);
+      requestAnimationFrame(restorePendingScrollNavigation);
     },
-    [book, chapters, clearPendingReadiumNavigation, db, showNotice, useNativeReadium]
+    [book, chapters, clearPendingReadiumNavigation, db, restorePendingScrollNavigation, showNotice, useNativePageReader]
   );
 
   const handleReadiumLocationChange = useCallback(
@@ -1016,17 +1221,19 @@ export default function ReaderScreen() {
         setChromeVisible(false);
         return;
       }
-      if (event.nativeEvent.zone === 'left') {
-        void nativeReaderRef.current?.goBackward(true);
-        return;
-      }
-      if (event.nativeEvent.zone === 'right') {
-        void nativeReaderRef.current?.goForward(true);
-        return;
+      if (preferences.readingMode === 'page') {
+        if (event.nativeEvent.zone === 'left') {
+          void nativeReaderRef.current?.goBackward(true);
+          return;
+        }
+        if (event.nativeEvent.zone === 'right') {
+          void nativeReaderRef.current?.goForward(true);
+          return;
+        }
       }
       setChromeVisible((visible) => !visible);
     },
-    [activeNoteAnchorKey, chromeVisible, closePanel, dismissSelectionNote, noteSelection, panel, textSelection]
+    [activeNoteAnchorKey, chromeVisible, closePanel, dismissSelectionNote, noteSelection, panel, preferences.readingMode, textSelection]
   );
 
   const handleReadiumDecorationPress = useCallback(
@@ -1110,7 +1317,7 @@ export default function ReaderScreen() {
         return;
       }
 
-      if (book && useNativeReadium) {
+      if (book && useNativePageReader) {
         const loadedChapter = chapterCache[result.chapterId] ?? (await getChapter(db, book.id, result.chapterId));
         if (!loadedChapter) {
           showNotice('命中章节加载失败');
@@ -1142,7 +1349,7 @@ export default function ReaderScreen() {
       goToChapter(chapterIndex, ratioFromOffset(chapters[chapterIndex], result.matchOffset));
       showNotice('已跳到命中位置');
     },
-    [book, chapterCache, chapters, db, goToChapter, searchQuery, showNotice, useNativeReadium]
+    [book, chapterCache, chapters, db, goToChapter, searchQuery, showNotice, useNativePageReader]
   );
 
   const goToAnnotation = useCallback(
@@ -1154,7 +1361,7 @@ export default function ReaderScreen() {
       }
 
       const position = parseAnnotationPosition(annotation.position);
-      if (book && useNativeReadium) {
+      if (book && useNativePageReader) {
         const loadedChapter = chapterCache[annotation.chapterId] ?? (await getChapter(db, book.id, annotation.chapterId));
         const locator = loadedChapter ? readiumLocatorForAnnotation(annotation, loadedChapter) ?? position.locator : position.locator;
         if (!locator) {
@@ -1184,10 +1391,10 @@ export default function ReaderScreen() {
         return;
       }
 
-      goToChapter(chapterIndex, ratioFromOffset(chapters[chapterIndex], position.offset));
+      goToChapter(chapterIndex, clampRatio(parseReadiumLocator(position.locator)?.locations?.progression ?? ratioFromOffset(chapters[chapterIndex], position.offset)));
       showNotice(`已跳到${annotationLabels[annotation.type]}`);
     },
-    [book, chapterCache, chapters, db, goToChapter, showNotice, useNativeReadium]
+    [book, chapterCache, chapters, db, goToChapter, showNotice, useNativePageReader]
   );
 
   const copySelectedText = useCallback(async () => {
@@ -1314,20 +1521,33 @@ export default function ReaderScreen() {
       chapterId: currentChapterMeta.id,
       type: 'bookmark',
       selectedText: currentChapterMeta.title,
-      position: JSON.stringify({ chapterId: currentChapterMeta.id, locator: useNativeReadium ? latestReadiumLocator.current : undefined }),
+      position: JSON.stringify({ chapterId: currentChapterMeta.id, locator: useNativePageReader ? latestReadiumLocator.current : undefined }),
     });
     setAnnotations(await listAnnotations(db, book.id));
     showNotice('已加入本章书签');
     setPanel('notes');
-  }, [book, currentBookmark, currentChapterMeta, db, showNotice, useNativeReadium]);
+  }, [book, currentBookmark, currentChapterMeta, db, showNotice, useNativePageReader]);
 
   const updatePreference = useCallback(
     async (next: ReaderPreferences) => {
+      const switchingMode = next.readingMode !== preferences.readingMode;
+      setRestoreRatio(latestProgressRatio.current);
+      if (switchingMode) {
+        setTextSelection(null);
+        setNoteSelection(null);
+        setActiveNoteAnchorKey(null);
+        setActiveNoteAnchorPoint(null);
+        void nativeReaderRef.current?.clearSelection?.();
+      }
+      if (next.readingMode === 'scroll') {
+        pendingScrollNavigation.current = { index: currentIndex, ratio: latestProgressRatio.current, animated: false };
+      }
       setPreferences(next);
       setPageStatus({ pageIndex: 1, pageCount: 1 });
       await updateReaderPreferences(db, next);
+      requestAnimationFrame(restorePendingScrollNavigation);
     },
-    [db]
+    [currentIndex, db, preferences.readingMode, restorePendingScrollNavigation]
   );
 
   if (loading) {
@@ -1363,7 +1583,7 @@ export default function ReaderScreen() {
     );
   }
 
-  if (!useNativeReadium) {
+  if (!useNativeReadium && preferences.readingMode === 'page') {
     return (
       <M3Screen key={`reader-readium-placeholder-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
         <View style={styles.stateWrap}>
@@ -1390,23 +1610,67 @@ export default function ReaderScreen() {
     <View style={[styles.screen, { backgroundColor: readerTheme.background }]}>
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
-          <InboxReaderView
-            ref={nativeReaderRef}
-            key={`readium-${book.id}-${book.publicationUri}`}
-            fileUri={book.publicationUri ?? book.fileUri}
-            initialLocator={initialReadiumLocator}
-            initialReadingOrderIndex={currentIndex}
-            initialProgression={restoreRatio}
-            preferences={preferences}
-            decorations={readiumDecorations}
-            onLocationChange={handleReadiumLocationChange}
-            onSelectionChange={handleReadiumSelectionChange}
-            onTap={handleReadiumTap}
-            onDecorationPress={handleReadiumDecorationPress}
-            onError={(event) => showNotice(event.nativeEvent.message)}
-            onExternalLink={handleReadiumExternalLink}
-            style={[styles.readerView, { backgroundColor: readerTheme.background }]}
-          />
+          {useContinuousScroll ? (
+            <FlatList
+              ref={scrollReaderRef}
+              data={chapters}
+              keyExtractor={(chapter) => chapter.id}
+              extraData={chapterCache}
+              initialScrollIndex={currentIndex}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={restorePendingScrollNavigation}
+              onScroll={handleScrollReaderScroll}
+              onScrollToIndexFailed={(info) => {
+                scrollReaderRef.current?.scrollToOffset({ animated: false, offset: Math.max(0, info.averageItemLength * info.index) });
+                requestAnimationFrame(restorePendingScrollNavigation);
+              }}
+              renderItem={({ item, index }) => (
+                <ScrollReaderChapter
+                  chapter={chapterCache[item.id] ?? item}
+                  chapterIndex={index}
+                  chapterCount={chapters.length}
+                  preferences={preferences}
+                  readerTheme={readerTheme}
+                  onLayout={(event) => handleScrollChapterLayout(item.id, event)}
+                  onPress={() => {
+                    if (chromeVisible || panel || textSelection) {
+                      closePanel();
+                      setChromeVisible(false);
+                      return;
+                    }
+                    setChromeVisible((visible) => !visible);
+                  }}
+                />
+              )}
+              scrollEventThrottle={120}
+              style={[styles.readerView, { backgroundColor: readerTheme.background }]}
+              contentContainerStyle={[
+                styles.scrollReaderContent,
+                {
+                  paddingBottom: Math.max(72, insets.bottom + 64),
+                  paddingTop: Math.max(32, insets.top + 28),
+                },
+              ]}
+            />
+          ) : (
+            <InboxReaderView
+              ref={nativeReaderRef}
+              key={`readium-${book.id}-${book.publicationUri}-${preferences.readingMode}`}
+              fileUri={book.publicationUri ?? book.fileUri}
+              initialLocator={initialReadiumLocator}
+              initialReadingOrderIndex={currentIndex}
+              initialProgression={restoreRatio}
+              preferences={preferences}
+              decorations={readiumDecorations}
+              onLocationChange={handleReadiumLocationChange}
+              onSelectionChange={handleReadiumSelectionChange}
+              onTap={handleReadiumTap}
+              onDecorationPress={handleReadiumDecorationPress}
+              onError={(event) => showNotice(event.nativeEvent.message)}
+              onExternalLink={handleReadiumExternalLink}
+              style={[styles.readerView, { backgroundColor: readerTheme.background }]}
+            />
+          )}
         </View>
       </Link.AppleZoomTarget>
 
@@ -2011,6 +2275,51 @@ const styles = StyleSheet.create({
   },
   readerView: {
     flex: 1,
+  },
+  scrollReaderContent: {
+    paddingBottom: 72,
+  },
+  scrollChapter: {
+    minHeight: 360,
+    paddingVertical: 34,
+    gap: 22,
+  },
+  scrollChapterHeading: {
+    gap: 9,
+    paddingBottom: 8,
+  },
+  scrollChapterKicker: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  scrollChapterTitle: {
+    fontSize: 25,
+    lineHeight: 33,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  scrollChapterRule: {
+    width: 48,
+    height: 3,
+    borderRadius: brand.radius.round,
+    opacity: 0.84,
+  },
+  scrollParagraphStack: {
+    gap: 13,
+  },
+  scrollParagraph: {
+    fontSize: 19,
+    lineHeight: 32,
+    fontWeight: '500',
+    letterSpacing: 0,
+  },
+  scrollChapterLoading: {
+    minHeight: 160,
+    borderTopWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   selectionToolbar: {
     position: 'absolute',
