@@ -79,8 +79,26 @@ type StoredChapter = {
   wordCount: number;
 };
 
+export type ImportBookProgress = {
+  title: string;
+  detail: string;
+  progress: number;
+};
+
+type ImportBookProgressHandler = (progress: ImportBookProgress) => void;
+
 const readerDirectory = new Directory(Paths.document, "inbox-reader");
 const INTERNAL_PUBLICATION_VERSION = "readium-internal-epub-v3-soft-paragraph-chunks";
+
+async function showImportProgress(
+  onProgress: ImportBookProgressHandler | undefined,
+  progress: ImportBookProgress,
+) {
+  onProgress?.(progress);
+  if (onProgress) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+}
 
 function normalizeAppThemeMode(theme?: string | null): AppThemeMode {
   if (theme === "system" || theme === "mist" || theme === "deep") {
@@ -388,6 +406,7 @@ async function importBookFile(
   db: SQLiteDatabase,
   sourceFile: File,
   originalName: string,
+  onProgress?: ImportBookProgressHandler,
 ) {
   const extension = originalName.split(".").pop()?.toLowerCase();
   const mimeType = sourceFile.type.toLowerCase();
@@ -402,19 +421,24 @@ async function importBookFile(
     throw new Error("当前版本仅支持 EPUB 和 TXT 文件。");
   }
 
+  await showImportProgress(onProgress, {
+    title: "读取文件",
+    detail: "正在复制到本地书库",
+    progress: 0.2,
+  });
   const { tempDir, tempFile, bytes } = await copyFileToPrivateFile(
     sourceFile,
     originalName,
   );
+
+  await showImportProgress(onProgress, {
+    title: "检查书籍",
+    detail: "正在确认格式和重复导入",
+    progress: 0.4,
+  });
   const contentHash = hashBytes(bytes);
   const id = `book_${contentHash}`;
   const legacyId = `book_${legacyHashBytes(bytes)}`;
-  const parsed = splitLongChapters(
-    inferredFormat === "epub"
-      ? parseEpub(bytes, originalName)
-      : parseTxt(bytes, originalName),
-  );
-  const now = new Date().toISOString();
 
   const existing = await db.getFirstAsync<{ id: string }>(
     "SELECT id FROM books WHERE id IN (?, ?) ORDER BY imported_at ASC LIMIT 1",
@@ -425,9 +449,31 @@ async function importBookFile(
     if (tempDir.exists) {
       tempDir.delete();
     }
+    await showImportProgress(onProgress, {
+      title: "已在书架",
+      detail: "正在打开已有副本",
+      progress: 1,
+    });
     return getBook(db, existing.id);
   }
 
+  await showImportProgress(onProgress, {
+    title: "解析内容",
+    detail: inferredFormat === "epub" ? "正在拆解目录和章节" : "正在整理文本章节",
+    progress: 0.62,
+  });
+  const parsed = splitLongChapters(
+    inferredFormat === "epub"
+      ? parseEpub(bytes, originalName)
+      : parseTxt(bytes, originalName),
+  );
+  const now = new Date().toISOString();
+
+  await showImportProgress(onProgress, {
+    title: "保存书架",
+    detail: "正在写入章节和搜索索引",
+    progress: 0.82,
+  });
   const stored = await writeParsedBookFiles(parsed, tempFile, originalName, id);
   if (tempDir.exists) {
     tempDir.delete();
@@ -452,10 +498,23 @@ async function importBookFile(
     await insertChapters(db, stored.id, stored.chapters);
   });
 
+  await showImportProgress(onProgress, {
+    title: "完成导入",
+    detail: "正在刷新书架",
+    progress: 1,
+  });
   return getBook(db, stored.id);
 }
 
-export async function importBook(db: SQLiteDatabase) {
+export async function importBook(
+  db: SQLiteDatabase,
+  onProgress?: ImportBookProgressHandler,
+) {
+  await showImportProgress(onProgress, {
+    title: "选择文件",
+    detail: "正在等待系统文件选择器",
+    progress: 0.06,
+  });
   const result = await File.pickFileAsync({
     mimeTypes: [
       "application/epub+zip",
@@ -470,12 +529,16 @@ export async function importBook(db: SQLiteDatabase) {
   }
 
   const pickedFile = result.result;
-  return importBookFile(db, pickedFile, pickedFile.name || "book");
+  return importBookFile(db, pickedFile, pickedFile.name || "book", onProgress);
 }
 
-export async function importBookFromUri(db: SQLiteDatabase, uri: string) {
+export async function importBookFromUri(
+  db: SQLiteDatabase,
+  uri: string,
+  onProgress?: ImportBookProgressHandler,
+) {
   const file = new File(uri);
-  return importBookFile(db, file, file.name || fileNameFromUri(uri, "book"));
+  return importBookFile(db, file, file.name || fileNameFromUri(uri, "book"), onProgress);
 }
 
 export async function listBooks(db: SQLiteDatabase) {

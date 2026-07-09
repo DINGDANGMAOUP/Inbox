@@ -27,7 +27,7 @@ import { motion } from '@/constants/motion';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
 import { authorLabel, bookProgressPercent, bookTitleLabel, hasReadingProgress, progressLabel } from '@/lib/library-book-labels';
-import { deleteBooks, importBook, listBooks } from '@/lib/reader-service';
+import { deleteBooks, importBook, listBooks, type ImportBookProgress } from '@/lib/reader-service';
 import type { LibraryBook, ResolvedAppTheme } from '@/types/reader';
 
 type LibraryFilter = 'all' | 'reading' | 'unread';
@@ -131,6 +131,7 @@ export default function LibraryScreen() {
   const [filter, setFilter] = useState<LibraryFilter>('all');
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportBookProgress | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -150,6 +151,7 @@ export default function LibraryScreen() {
 
   const featuredBook = books.find(hasReadingProgress);
   const featuredProgressPercent = featuredBook ? bookProgressPercent(featuredBook) : null;
+  const importProgressPercent = importProgress ? Math.round(importProgress.progress * 100) : 0;
 
   const startedCount = useMemo(() => {
     return books.filter(hasReadingProgress).length;
@@ -175,16 +177,18 @@ export default function LibraryScreen() {
 
   const handleImport = useCallback(async () => {
     setImporting(true);
+    setNotice(null);
     try {
-      const imported = await importBook(db);
-      await refresh();
+      const imported = await importBook(db, setImportProgress);
       if (imported) {
+        await refresh();
         setNotice(`已收进书架：${imported.title}`);
         setTimeout(() => setNotice(null), 3600);
       }
     } catch (error) {
       Alert.alert('导入失败', error instanceof Error ? error.message : '无法导入所选书籍。');
     } finally {
+      setImportProgress(null);
       setImporting(false);
     }
   }, [db, refresh]);
@@ -442,6 +446,43 @@ export default function LibraryScreen() {
         onRefresh={refresh}
         contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}
       />
+      {importProgress && !selectionMode && (
+        <Animated.View
+          entering={m3Motion.fadeDown()}
+          exiting={m3Motion.fadeShortOut()}
+          accessibilityRole="progressbar"
+          accessibilityValue={{ min: 0, max: 100, now: importProgressPercent }}
+          style={[
+            styles.importProgressPanel,
+            {
+              bottom: Math.max(88, insets.bottom + 86),
+              backgroundColor: theme.surfaceSolid,
+              borderColor: theme.line,
+            },
+          ]}>
+          <View style={styles.importProgressHeader}>
+            <ActivityIndicator color={theme.accent} />
+            <View style={styles.importProgressCopy}>
+              <Text numberOfLines={1} style={[styles.importProgressTitle, { color: theme.text }]}>
+                {importProgress.title}
+              </Text>
+              <Text numberOfLines={1} style={[styles.importProgressDetail, { color: theme.muted }]}>
+                {importProgress.detail}
+              </Text>
+            </View>
+            <Text style={[styles.importProgressPercent, { color: theme.accent }]}>{importProgressPercent}%</Text>
+          </View>
+          <View style={[styles.importProgressTrack, { backgroundColor: theme.line }]}>
+            <Animated.View
+              layout={m3Motion.layoutMedium()}
+              style={[
+                styles.importProgressFill,
+                { width: `${Math.max(6, importProgressPercent)}%`, backgroundColor: theme.accent },
+              ]}
+            />
+          </View>
+        </Animated.View>
+      )}
       {!selectionMode && (
         <M3Pressable
           onPress={handleImport}
@@ -452,7 +493,11 @@ export default function LibraryScreen() {
           accessibilityLabel={importing ? '导入中' : '导入书籍'}
           style={[styles.floatingImportButton, { bottom: Math.max(20, insets.bottom + 18) }]}>
           <View pointerEvents="none">
-            <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description={importing ? '导入中' : '导入书籍'} decorative size={22} />
+            {importing ? (
+              <ActivityIndicator color={brand.chrome.accentText} />
+            ) : (
+              <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description="导入书籍" decorative size={22} />
+            )}
           </View>
         </M3Pressable>
       )}
@@ -943,6 +988,59 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0,
+  },
+  importProgressPanel: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    zIndex: 58,
+    elevation: 12,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    padding: 14,
+    gap: 12,
+    boxShadow: '0 18px 34px rgba(18, 20, 15, 0.18)',
+  },
+  importProgressHeader: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  importProgressCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  importProgressTitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  importProgressDetail: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  importProgressPercent: {
+    minWidth: 44,
+    textAlign: 'right',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
+  },
+  importProgressTrack: {
+    height: 8,
+    borderRadius: brand.radius.round,
+    overflow: 'hidden',
+  },
+  importProgressFill: {
+    height: '100%',
+    borderRadius: brand.radius.round,
   },
   floatingImportButton: {
     position: 'absolute',
