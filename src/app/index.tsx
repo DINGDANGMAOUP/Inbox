@@ -15,12 +15,12 @@ import {
 import Animated, { FadeIn, FadeOut, SlideInLeft, SlideOutLeft } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { IconButton } from '@/components/reader/icon-button';
+import { IconButton } from '@/components/ui/icon-button';
 import { LibraryBookRow } from '@/components/reader/library-book-row';
-import { M3FilterChip, M3Screen, M3StatePanel } from '@/components/reader/m3';
-import { m3Motion } from '@/components/reader/motion-presets';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
+import { FilterChip, AppScreen, StatePanel } from '@/components/ui/app-ui';
+import { appMotion } from '@/components/ui/motion-presets';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/ui/material-symbol';
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
@@ -67,7 +67,7 @@ function DrawerMenuItem({
   onPress: () => void;
 }) {
   return (
-    <M3Pressable
+    <FeedbackPressable
       onPress={onPress}
       feedback="subtle"
       accessibilityLabel={`${title}，${detail}`}
@@ -85,7 +85,7 @@ function DrawerMenuItem({
       <View style={styles.drawerItemArrow}>
         <MaterialSymbol name="chevron.right" color={theme.muted} description={`${title}菜单`} decorative size={17} />
       </View>
-    </M3Pressable>
+    </FeedbackPressable>
   );
 }
 
@@ -293,7 +293,7 @@ export default function LibraryScreen() {
     <View style={styles.libraryListHeader}>
       <View style={styles.topAppBar}>
         <View style={styles.brandRow}>
-          <M3Pressable
+          <FeedbackPressable
             captureTouches
             onPress={() => setMenuOpen(true)}
             feedback="subtle"
@@ -301,7 +301,7 @@ export default function LibraryScreen() {
             accessibilityLabel="打开菜单"
             style={[styles.brandMenuButton, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
             <BrandSeal />
-          </M3Pressable>
+          </FeedbackPressable>
           <View style={styles.heroText}>
             <Text numberOfLines={1} style={[styles.brandTitle, { color: ambientTextColor }]}>
               墨屿
@@ -323,7 +323,7 @@ export default function LibraryScreen() {
       </View>
 
       <View style={styles.libraryHero}>
-        <Image source={appThemeAssets[activeTheme].materialBoard} contentFit="cover" transition={220} style={styles.heroMaterialBoard} />
+        <Image source={appThemeAssets[activeTheme].themeBoard} contentFit="cover" transition={220} style={styles.heroThemeBoard} />
         <View style={styles.heroTint} />
         <View style={styles.libraryHeroTop}>
           <View style={styles.heroCopyBlock}>
@@ -334,7 +334,7 @@ export default function LibraryScreen() {
       </View>
 
       {notice && (
-        <Animated.View entering={m3Motion.fadeDown()} exiting={m3Motion.fadeShortOut()} style={styles.notice}>
+        <Animated.View entering={appMotion.fadeDown()} exiting={appMotion.fadeShortOut()} style={styles.notice}>
           <Text numberOfLines={2} style={styles.noticeText}>
             {notice}
           </Text>
@@ -342,8 +342,8 @@ export default function LibraryScreen() {
       )}
 
       {featuredBook && (
-        <Animated.View entering={m3Motion.fadeDown()}>
-          <M3Pressable
+        <Animated.View entering={appMotion.fadeDown()}>
+          <FeedbackPressable
             onPress={() => router.push({ pathname: '/reader/[id]', params: { id: featuredBook.id } })}
             feedback="subtle"
             style={[
@@ -376,7 +376,7 @@ export default function LibraryScreen() {
                 </View>
               </View>
             </View>
-          </M3Pressable>
+          </FeedbackPressable>
         </Animated.View>
       )}
 
@@ -393,7 +393,7 @@ export default function LibraryScreen() {
         {libraryFilters.map((item) => {
           const active = filter === item.value;
           return (
-            <M3FilterChip
+            <FilterChip
               key={item.value}
               theme={theme}
               selected={active}
@@ -408,9 +408,9 @@ export default function LibraryScreen() {
   );
 
   const emptyList = loading && books.length === 0 ? (
-    <M3StatePanel theme={theme} title="正在整理书架" artwork={<ActivityIndicator color={theme.accent} />} />
+    <StatePanel theme={theme} title="正在整理书架" artwork={<ActivityIndicator color={theme.accent} />} />
   ) : (
-    <M3StatePanel
+    <StatePanel
       theme={theme}
       title={filter === 'all' ? '导入第一本书' : '这里还没有书'}
       body="支持 EPUB 与 TXT。"
@@ -422,11 +422,11 @@ export default function LibraryScreen() {
           <EmptyCapability theme={activeTheme} label="TXT" />
         </View>
       )}
-    </M3StatePanel>
+    </StatePanel>
   );
 
   return (
-    <M3Screen
+    <AppScreen
       key={`library-screen-${activeTheme}`}
       theme={theme}
       backgroundSource={appThemeAssets[activeTheme].background}
@@ -447,8 +447,8 @@ export default function LibraryScreen() {
       />
       {importProgress && !selectionMode && (
         <Animated.View
-          entering={m3Motion.fadeDown()}
-          exiting={m3Motion.fadeShortOut()}
+          entering={appMotion.fadeDown()}
+          exiting={appMotion.fadeShortOut()}
           accessibilityRole="progressbar"
           accessibilityValue={{ min: 0, max: 100, now: importProgressPercent }}
           style={[
@@ -473,7 +473,7 @@ export default function LibraryScreen() {
           </View>
           <View style={[styles.importProgressTrack, { backgroundColor: theme.line }]}>
             <Animated.View
-              layout={m3Motion.layoutMedium()}
+              layout={appMotion.layoutMedium()}
               style={[
                 styles.importProgressFill,
                 { width: `${Math.max(6, importProgressPercent)}%`, backgroundColor: theme.accent },
@@ -483,7 +483,7 @@ export default function LibraryScreen() {
         </Animated.View>
       )}
       {!selectionMode && (
-        <M3Pressable
+        <FeedbackPressable
           onPress={handleImport}
           disabled={importing}
           feedback="strong"
@@ -498,24 +498,24 @@ export default function LibraryScreen() {
               <MaterialSymbol name="tray.and.arrow.down" color={brand.chrome.accentText} description="导入书籍" decorative size={22} />
             )}
           </View>
-        </M3Pressable>
+        </FeedbackPressable>
       )}
       {selectionMode && (
-        <Animated.View entering={m3Motion.bottomBarIn()} exiting={m3Motion.bottomBarOut()} style={[styles.selectionBar, { bottom: Math.max(16, insets.bottom + 14), backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+        <Animated.View entering={appMotion.bottomBarIn()} exiting={appMotion.bottomBarOut()} style={[styles.selectionBar, { bottom: Math.max(16, insets.bottom + 14), backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
           <View style={styles.selectionBarCopy}>
             <Text style={[styles.selectionBarTitle, { color: theme.text }]}>{selectedCount} 本已选</Text>
             <Text style={[styles.selectionBarDetail, { color: theme.muted }]}>仅移除应用内副本</Text>
           </View>
           <View style={styles.selectionBarActions}>
-            <M3Pressable captureTouches feedback="subtle" hitSlop={8} accessibilityLabel="取消选择模式" style={[styles.selectionActionButton, { backgroundColor: theme.surface, borderColor: theme.line }]} onPress={clearSelection}>
+            <FeedbackPressable captureTouches feedback="subtle" hitSlop={8} accessibilityLabel="取消选择模式" style={[styles.selectionActionButton, { backgroundColor: theme.surface, borderColor: theme.line }]} onPress={clearSelection}>
               <Text style={[styles.selectionActionText, { color: theme.text }]}>取消</Text>
-            </M3Pressable>
-            <M3Pressable captureTouches feedback="subtle" hitSlop={8} accessibilityLabel={allVisibleSelected ? '清空选择' : '全选当前列表'} style={[styles.selectionActionButton, { backgroundColor: theme.surface, borderColor: theme.line }]} onPress={toggleVisibleSelection}>
+            </FeedbackPressable>
+            <FeedbackPressable captureTouches feedback="subtle" hitSlop={8} accessibilityLabel={allVisibleSelected ? '清空选择' : '全选当前列表'} style={[styles.selectionActionButton, { backgroundColor: theme.surface, borderColor: theme.line }]} onPress={toggleVisibleSelection}>
               <Text style={[styles.selectionActionText, { color: theme.text }]}>{allVisibleSelected ? '清空' : '全选'}</Text>
-            </M3Pressable>
-            <M3Pressable captureTouches feedback="strong" hitSlop={8} disabled={selectedCount === 0} accessibilityLabel="移除所选书籍" style={[styles.selectionDeleteButton, { backgroundColor: theme.error }]} onPress={handleDeleteSelected}>
+            </FeedbackPressable>
+            <FeedbackPressable captureTouches feedback="strong" hitSlop={8} disabled={selectedCount === 0} accessibilityLabel="移除所选书籍" style={[styles.selectionDeleteButton, { backgroundColor: theme.error }]} onPress={handleDeleteSelected}>
               <Text style={styles.selectionDeleteText}>移除</Text>
-            </M3Pressable>
+            </FeedbackPressable>
           </View>
         </Animated.View>
       )}
@@ -566,7 +566,7 @@ export default function LibraryScreen() {
           </Animated.View>
         </Animated.View>
       )}
-    </M3Screen>
+    </AppScreen>
   );
 }
 
@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     boxShadow: '0 22px 42px rgba(18, 20, 15, 0.18)',
   },
-  heroMaterialBoard: {
+  heroThemeBoard: {
     position: 'absolute',
     top: 0,
     right: 0,

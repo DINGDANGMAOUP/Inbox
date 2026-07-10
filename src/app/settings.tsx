@@ -2,10 +2,10 @@ import { type ReactNode, useCallback, useEffect } from 'react';
 import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { M3PageHeader, M3Screen, M3Stepper } from '@/components/reader/m3';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
-import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
+import { PageHeader, AppScreen, Stepper } from '@/components/ui/app-ui';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/ui/material-symbol';
+import { useRouteSlideTransition } from '@/components/ui/route-slide-transition';
 import { brand } from '@/constants/brand';
 import { readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
 import { appThemeAssets } from '@/constants/theme-assets';
@@ -74,13 +74,13 @@ export default function SettingsScreen() {
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
-      <M3Screen
+      <AppScreen
         key={`settings-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
         overlayColor={resolvedAppTheme === 'deep' ? 'rgba(8, 9, 6, 0.46)' : 'rgba(250, 248, 242, 0.93)'}>
         <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
-          <M3PageHeader
+          <PageHeader
             theme={theme}
             title="阅读器设置"
             subtitle={saving ? '外观、排版和阅读方式 · 保存中' : '外观、排版和阅读方式'}
@@ -131,15 +131,15 @@ export default function SettingsScreen() {
               <SettingGroup theme={theme} title="排版">
                 <ReadingPreview preferences={preferences} />
                 <View style={styles.stepperStack}>
-                  <M3Stepper compact theme={theme} label="字号" value={String(preferences.fontSize)} onMinus={() => stepPreference('fontSize', -1)} onPlus={() => stepPreference('fontSize', 1)} />
-                  <M3Stepper compact theme={theme} label="行距" value={preferences.lineHeight.toFixed(1)} onMinus={() => stepPreference('lineHeight', -0.1)} onPlus={() => stepPreference('lineHeight', 0.1)} />
-                  <M3Stepper compact theme={theme} label="页边距" value={String(preferences.margin)} onMinus={() => stepPreference('margin', -2)} onPlus={() => stepPreference('margin', 2)} />
+                  <Stepper compact theme={theme} label="字号" value={String(preferences.fontSize)} onMinus={() => stepPreference('fontSize', -1)} onPlus={() => stepPreference('fontSize', 1)} />
+                  <Stepper compact theme={theme} label="行距" value={preferences.lineHeight.toFixed(1)} onMinus={() => stepPreference('lineHeight', -0.1)} onPlus={() => stepPreference('lineHeight', 0.1)} />
+                  <Stepper compact theme={theme} label="页边距" value={String(preferences.margin)} onMinus={() => stepPreference('margin', -2)} onPlus={() => stepPreference('margin', 2)} />
                 </View>
               </SettingGroup>
             </>
           )}
         </ScrollView>
-      </M3Screen>
+      </AppScreen>
     </Animated.View>
   );
 }
@@ -184,7 +184,7 @@ function PreferenceChoice({
   onPress: () => void;
 }) {
   return (
-    <M3Pressable
+    <FeedbackPressable
       onPress={onPress}
       feedback={selected ? 'subtle' : 'standard'}
       accessibilityRole="button"
@@ -212,7 +212,7 @@ function PreferenceChoice({
           <View key={color} style={[styles.choiceSwatchDot, { backgroundColor: color, borderColor: theme.line }]} />
         ))}
       </View>
-    </M3Pressable>
+    </FeedbackPressable>
   );
 }
 
@@ -232,7 +232,7 @@ function FontSelector({
         const copy = readerFontFamilies[fontFamily];
         const foreground = selected ? theme.onPrimaryContainer : theme.text;
         return (
-          <M3Pressable
+          <FeedbackPressable
             key={fontFamily}
             accessibilityRole="button"
             accessibilityState={{ selected }}
@@ -251,7 +251,7 @@ function FontSelector({
             <Text numberOfLines={1} style={[styles.fontOptionLabel, { color: selected ? theme.onPrimaryContainer : theme.muted }]}>
               {copy.label}
             </Text>
-          </M3Pressable>
+          </FeedbackPressable>
         );
       })}
     </View>
@@ -272,7 +272,7 @@ function ModeSelector({
       {(['scroll', 'page'] as const).map((mode) => {
         const selected = value === mode;
         return (
-          <M3Pressable
+          <FeedbackPressable
             key={mode}
             accessibilityRole="button"
             accessibilityState={{ selected }}
@@ -280,7 +280,7 @@ function ModeSelector({
             onPress={() => onChange(mode)}
             style={[styles.modeOption, selected && { backgroundColor: theme.surfaceSolid, borderColor: theme.accent }]}>
             <Text style={[styles.modeOptionText, { color: selected ? theme.text : theme.muted }]}>{readingModeCopy[mode].title}</Text>
-          </M3Pressable>
+          </FeedbackPressable>
         );
       })}
     </View>

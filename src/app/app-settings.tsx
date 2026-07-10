@@ -2,10 +2,10 @@ import { type ReactNode, useCallback, useEffect } from 'react';
 import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { M3PageHeader, M3Screen } from '@/components/reader/m3';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
-import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
+import { PageHeader, AppScreen } from '@/components/ui/app-ui';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/ui/material-symbol';
+import { useRouteSlideTransition } from '@/components/ui/route-slide-transition';
 import { brand } from '@/constants/brand';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { useReaderPreferences } from '@/hooks/use-reader-preferences';
@@ -49,13 +49,13 @@ export default function AppSettingsScreen() {
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
-      <M3Screen
+      <AppScreen
         key={`app-settings-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
         overlayColor={resolvedAppTheme === 'deep' ? 'rgba(8, 9, 6, 0.46)' : 'rgba(250, 248, 242, 0.93)'}>
         <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
-          <M3PageHeader
+          <PageHeader
             theme={theme}
             title="应用设置"
             subtitle={saving ? '界面主题和数据管理 · 保存中' : '界面主题和数据管理'}
@@ -89,7 +89,7 @@ export default function AppSettingsScreen() {
             </>
           )}
         </ScrollView>
-      </M3Screen>
+      </AppScreen>
     </Animated.View>
   );
 }
@@ -134,7 +134,7 @@ function PreferenceChoice({
   onPress: () => void;
 }) {
   return (
-    <M3Pressable
+    <FeedbackPressable
       onPress={onPress}
       feedback={selected ? 'subtle' : 'standard'}
       accessibilityRole="button"
@@ -156,7 +156,7 @@ function PreferenceChoice({
           <View key={color} style={[styles.choiceSwatchDot, { backgroundColor: color, borderColor: theme.line }]} />
         ))}
       </View>
-    </M3Pressable>
+    </FeedbackPressable>
   );
 }
 

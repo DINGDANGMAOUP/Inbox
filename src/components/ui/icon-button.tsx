@@ -1,8 +1,8 @@
 import { StyleSheet, Text, View, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';
 
 import { brand } from '@/constants/brand';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/ui/material-symbol';
 
 type IconButtonProps = Omit<PressableProps, 'style'> & {
   icon: MaterialSymbolName;
@@ -42,7 +42,7 @@ export function IconButton({ icon, label, tintColor, tone = 'dark', size = 'regu
           {label}
         </Text>
       )}
-      <M3Pressable
+      <FeedbackPressable
         captureTouches
         accessibilityLabel={label}
         disabled={disabled}

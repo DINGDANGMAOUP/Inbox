@@ -4,7 +4,7 @@ import Animated from 'react-native-reanimated';
 
 import { brandAssets } from '@/constants/brand-assets';
 import { brand } from '@/constants/brand';
-import { m3Motion } from '@/components/reader/motion-presets';
+import { appMotion } from '@/components/ui/motion-presets';
 import { appThemeAssets } from '@/constants/theme-assets';
 import { cleanChapterTitle } from '@/lib/text-utils';
 import type { Book, ResolvedAppTheme } from '@/types/reader';
@@ -38,7 +38,7 @@ export function BookCover({ book, size = 'grid', theme }: BookCoverProps) {
 
   return (
     <Animated.View
-      entering={m3Motion.fadeShortIn()}
+      entering={appMotion.fadeShortIn()}
       style={[
         styles.cover,
         styles[size],

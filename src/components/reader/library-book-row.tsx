@@ -2,8 +2,8 @@ import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { BookCover } from '@/components/reader/book-cover';
-import { MaterialSymbol } from '@/components/reader/material-symbol';
-import { M3Pressable } from '@/components/reader/m3-pressable';
+import { MaterialSymbol } from '@/components/ui/material-symbol';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
 import { brand } from '@/constants/brand';
 import {
   authorLabel,
@@ -35,7 +35,7 @@ export function LibraryBookRow({
 
   return (
     <View style={styles.tile}>
-      <M3Pressable
+      <FeedbackPressable
         onPress={() => (selectionMode ? onSelect?.(book) : openBook())}
         onLongPress={() => onStartSelection?.(book)}
         feedback="subtle"
@@ -77,7 +77,7 @@ export function LibraryBookRow({
             <View style={[styles.progressFill, { width: `${fillPercent}%`, backgroundColor: themeToken.accent }]} />
           </View>
         </View>
-      </M3Pressable>
+      </FeedbackPressable>
     </View>
   );
 }

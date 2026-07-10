@@ -30,12 +30,12 @@ import Animated, { cancelAnimation, FadeIn, FadeOut, useAnimatedStyle, useShared
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { InboxReaderView, type InboxReaderDecoration, type InboxReaderDecorationPressEvent, type InboxReaderExternalLinkEvent, type InboxReaderLocationEvent, type InboxReaderSelection, type InboxReaderTapEvent, type InboxReaderViewRef } from '../../../modules/inbox-reader';
-import { AdaptiveSurface } from '@/components/reader/adaptive-surface';
-import { IconButton } from '@/components/reader/icon-button';
-import { M3FilterChip, M3Screen, M3SegmentedControl, M3StatePanel, M3Stepper } from '@/components/reader/m3';
-import { m3Easing, m3Motion } from '@/components/reader/motion-presets';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
+import { AdaptiveSurface } from '@/components/ui/adaptive-surface';
+import { IconButton } from '@/components/ui/icon-button';
+import { FilterChip, AppScreen, SegmentedControl, StatePanel, Stepper } from '@/components/ui/app-ui';
+import { appEasing, appMotion } from '@/components/ui/motion-presets';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/ui/material-symbol';
 import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
 import { readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
@@ -272,7 +272,7 @@ function ReaderToolChip({
   const color = active ? chromeTheme.accentText : primary ? chromeTheme.onPrimaryContainer : chromeTheme.text;
 
   return (
-    <M3Pressable
+    <FeedbackPressable
       captureTouches
       onPress={onPress}
       feedback={active ? 'subtle' : 'standard'}
@@ -287,7 +287,7 @@ function ReaderToolChip({
       <Text numberOfLines={1} style={[styles.readerToolChipText, { color }]}>
         {label}
       </Text>
-    </M3Pressable>
+    </FeedbackPressable>
   );
 }
 
@@ -620,8 +620,8 @@ export default function ReaderScreen() {
     };
   });
   const readerSurfaceShieldStyle = useAnimatedStyle(() => ({ opacity: readerSurfaceShieldOpacity.get() }));
-  const chapterChromeEntering = reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn();
-  const chapterChromeExiting = FadeOut.duration(80).easing(m3Easing.emphasizedAccelerate);
+  const chapterChromeEntering = reduceMotion ? FadeIn.duration(80) : appMotion.fadeShortIn();
+  const chapterChromeExiting = FadeOut.duration(80).easing(appEasing.emphasizedAccelerate);
   const selectionMenuStyle = useMemo(() => {
     if (!textSelection) {
       return null;
@@ -771,7 +771,7 @@ export default function ReaderScreen() {
     const showing = chromeVisible;
     chromeProgress.set(withTiming(showing ? 1 : 0, {
       duration: reduceMotion ? 80 : showing ? motion.duration.medium : 180,
-      easing: showing ? m3Easing.emphasizedDecelerate : m3Easing.emphasizedAccelerate,
+      easing: showing ? appEasing.emphasizedDecelerate : appEasing.emphasizedAccelerate,
     }));
 
     if (useNativePageReader && showing) {
@@ -779,7 +779,7 @@ export default function ReaderScreen() {
       readerSurfaceShieldOpacity.set(1);
       readerSurfaceShieldOpacity.set(withTiming(0, {
         duration: reduceMotion ? 80 : motion.duration.medium,
-        easing: m3Easing.emphasizedDecelerate,
+        easing: appEasing.emphasizedDecelerate,
       }));
     } else if (!showing) {
       cancelAnimation(readerSurfaceShieldOpacity);
@@ -790,7 +790,7 @@ export default function ReaderScreen() {
   useEffect(() => {
     dockProgress.set(withTiming(panel === null ? 1 : 0, {
       duration: reduceMotion ? 80 : motion.duration.short,
-      easing: panel === null ? m3Easing.emphasizedDecelerate : m3Easing.emphasizedAccelerate,
+      easing: panel === null ? appEasing.emphasizedDecelerate : appEasing.emphasizedAccelerate,
     }));
   }, [dockProgress, panel, reduceMotion]);
 
@@ -1405,21 +1405,21 @@ export default function ReaderScreen() {
 
   if (loading) {
     return (
-      <M3Screen key={`reader-loading-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+      <AppScreen key={`reader-loading-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
         <StatusBar animated style={statusBarStyle} />
         <View style={styles.stateWrap}>
-          <M3StatePanel theme={themeToken} title="正在打开阅读器" body="正在恢复章节、主题和阅读进度。" artwork={<ActivityIndicator color={themeToken.accent} />} />
+          <StatePanel theme={themeToken} title="正在打开阅读器" body="正在恢复章节、主题和阅读进度。" artwork={<ActivityIndicator color={themeToken.accent} />} />
         </View>
-      </M3Screen>
+      </AppScreen>
     );
   }
 
   if (!book || !currentChapterMeta) {
     return (
-      <M3Screen key={`reader-missing-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+      <AppScreen key={`reader-missing-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
         <StatusBar animated style={statusBarStyle} />
         <View style={styles.stateWrap}>
-          <M3StatePanel
+          <StatePanel
             theme={themeToken}
             title="未找到这本书"
             body="这本书可能已被删除，或本机数据库仍在整理。"
@@ -1432,18 +1432,18 @@ export default function ReaderScreen() {
               style={{ backgroundColor: themeToken.surfaceContainerHigh, borderColor: themeToken.line }}
               onPress={handleReaderBack}
             />
-          </M3StatePanel>
+          </StatePanel>
         </View>
-      </M3Screen>
+      </AppScreen>
     );
   }
 
   if (!useNativeReadium && preferences.readingMode === 'page') {
     return (
-      <M3Screen key={`reader-readium-placeholder-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+      <AppScreen key={`reader-readium-placeholder-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
         <StatusBar animated style={statusBarStyle} />
         <View style={styles.stateWrap}>
-          <M3StatePanel
+          <StatePanel
             theme={themeToken}
             title="阅读器占位"
             body={Platform.OS === 'android' ? '旧 WebView 引擎已移除。请重新导入这本书生成 Readium EPUB。' : '旧 WebView 引擎已移除；此平台的 Readium 阅读器后续接入。'}
@@ -1456,9 +1456,9 @@ export default function ReaderScreen() {
               style={{ backgroundColor: themeToken.surfaceContainerHigh, borderColor: themeToken.line }}
               onPress={handleReaderBack}
             />
-          </M3StatePanel>
+          </StatePanel>
         </View>
-      </M3Screen>
+      </AppScreen>
     );
   }
 
@@ -1542,20 +1542,20 @@ export default function ReaderScreen() {
           entering={reduceMotion ? FadeIn.duration(80) : FadeIn.duration(120)}
           exiting={reduceMotion ? FadeOut.duration(80) : FadeOut.duration(90)}
           style={[styles.selectionToolbar, selectionMenuStyle, { backgroundColor: readerTheme.surfaceSolid, borderColor: readerTheme.line }]}>
-          <M3Pressable captureTouches onPress={copySelectedText} feedback="subtle" accessibilityLabel="复制选中内容" style={styles.selectionToolButton}>
+          <FeedbackPressable captureTouches onPress={copySelectedText} feedback="subtle" accessibilityLabel="复制选中内容" style={styles.selectionToolButton}>
             <MaterialSymbol name="copy" color={readerTheme.accent} description="复制" decorative size={17} />
             <Text style={[styles.selectionToolText, { color: readerTheme.text }]}>复制</Text>
-          </M3Pressable>
+          </FeedbackPressable>
           <View style={[styles.selectionToolDivider, { backgroundColor: readerTheme.line }]} />
-          <M3Pressable captureTouches onPress={saveSelectedHighlight} feedback="subtle" accessibilityLabel="保存划线" style={styles.selectionToolButton}>
+          <FeedbackPressable captureTouches onPress={saveSelectedHighlight} feedback="subtle" accessibilityLabel="保存划线" style={styles.selectionToolButton}>
             <MaterialSymbol name="highlighter" color={readerTheme.accent} description="划线" decorative size={17} />
             <Text style={[styles.selectionToolText, { color: readerTheme.text }]}>划线</Text>
-          </M3Pressable>
+          </FeedbackPressable>
           <View style={[styles.selectionToolDivider, { backgroundColor: readerTheme.line }]} />
-          <M3Pressable captureTouches onPress={startSelectionNote} feedback="subtle" accessibilityLabel="添加笔记" style={styles.selectionToolButton}>
+          <FeedbackPressable captureTouches onPress={startSelectionNote} feedback="subtle" accessibilityLabel="添加笔记" style={styles.selectionToolButton}>
             <MaterialSymbol name="note" color={readerTheme.accent} description="笔记" decorative size={17} />
             <Text style={[styles.selectionToolText, { color: readerTheme.text }]}>笔记</Text>
-          </M3Pressable>
+          </FeedbackPressable>
         </Animated.View>
       )}
 
@@ -1604,15 +1604,15 @@ export default function ReaderScreen() {
         style={[styles.bottomChrome, { bottom: chromeBottomOffset }, bottomChromeMotionStyle]}>
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <View style={[styles.chapterStrip, { borderBottomColor: chromeTheme.controlBorder }]}>
-              <M3Pressable
+              <FeedbackPressable
                 captureTouches
                 disabled={currentIndex === 0}
                 onPress={() => goToChapter(Math.max(0, currentIndex - 1), preferences.readingMode === 'page' ? 1 : 0)}
                 feedback="subtle"
                 style={[styles.chapterTextButton, currentIndex === 0 && styles.disabledChapterButton]}>
                 <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>上一章</Text>
-              </M3Pressable>
-              <M3Pressable captureTouches onPress={() => setPanel(panel === 'toc' ? null : 'toc')} feedback="subtle" style={styles.chapterCenter}>
+              </FeedbackPressable>
+              <FeedbackPressable captureTouches onPress={() => setPanel(panel === 'toc' ? null : 'toc')} feedback="subtle" style={styles.chapterCenter}>
                 {chapterChromeVisible ? (
                   <Animated.View entering={chapterChromeEntering} exiting={chapterChromeExiting} style={styles.chapterCenterCopy}>
                     <Text numberOfLines={1} style={[styles.chapterCenterTitle, { color: chromeTheme.text }]}>
@@ -1624,15 +1624,15 @@ export default function ReaderScreen() {
                     </Text>
                   </Animated.View>
                 ) : null}
-              </M3Pressable>
-              <M3Pressable
+              </FeedbackPressable>
+              <FeedbackPressable
                 captureTouches
                 disabled={currentIndex >= chapters.length - 1}
                 onPress={() => goToChapter(Math.min(chapters.length - 1, currentIndex + 1), 0)}
                 feedback="subtle"
                 style={[styles.chapterTextButton, currentIndex >= chapters.length - 1 && styles.disabledChapterButton]}>
                 <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>下一章</Text>
-              </M3Pressable>
+              </FeedbackPressable>
             </View>
             <View style={styles.readerToolRow}>
               <ReaderToolChip icon="list.bullet" label="目录" tone="primary" active={panel === 'toc'} chromeTheme={chromeTheme} onPress={() => setPanel(panel === 'toc' ? null : 'toc')} />
@@ -1645,8 +1645,8 @@ export default function ReaderScreen() {
 
       {panel && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
-          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
+          entering={reduceMotion ? FadeIn.duration(80) : appMotion.slideChromeDown()}
+          exiting={reduceMotion ? FadeOut.duration(80) : appMotion.slideOutDown()}
           style={[styles.panel, { bottom: chromeBottomOffset }, panel === 'search' ? { height: panelHeight } : { maxHeight: panelHeight }]}>
           <AdaptiveSurface style={[styles.panelSurface, panel === 'search' && styles.panelSurfaceFill, { backgroundColor: chromeTheme.panelSurface, borderColor: chromeTheme.border }]}>
             <View style={[styles.panelHandle, { backgroundColor: chromeTheme.controlBorder }]} />
@@ -1672,7 +1672,7 @@ export default function ReaderScreen() {
               {readerPanelTabs.map((item) => {
                 const active = panel === item.value;
                 return (
-                  <M3Pressable
+                  <FeedbackPressable
                     key={item.value}
                     captureTouches
                     accessibilityRole="button"
@@ -1685,7 +1685,7 @@ export default function ReaderScreen() {
                     <Text numberOfLines={1} style={[styles.panelTabText, { color: active ? chromeTheme.accentText : chromeTheme.text }]}>
                       {item.label}
                     </Text>
-                  </M3Pressable>
+                  </FeedbackPressable>
                 );
               })}
             </View>
@@ -1696,7 +1696,7 @@ export default function ReaderScreen() {
                   {chapters.map((chapter, index) => {
                     const active = index === currentIndex;
                     return (
-                      <M3Pressable
+                      <FeedbackPressable
                         key={chapter.id}
                         onPress={() => goToChapter(index, 0, true)}
                         feedback={active ? 'subtle' : 'standard'}
@@ -1722,7 +1722,7 @@ export default function ReaderScreen() {
                             {chapter.wordCount.toLocaleString()} 字
                           </Text>
                         </View>
-                      </M3Pressable>
+                      </FeedbackPressable>
                     );
                   })}
                 </ScrollView>
@@ -1742,7 +1742,7 @@ export default function ReaderScreen() {
                 />
                 <ScrollView keyboardShouldPersistTaps="handled" style={styles.panelScroll} contentContainerStyle={styles.panelList}>
                   {searchResults.map((result) => (
-                    <M3Pressable
+                    <FeedbackPressable
                       key={`${result.chapterId}-${result.matchOffset}`}
                       onPress={() => goToSearchResult(result)}
                       feedback="standard"
@@ -1756,7 +1756,7 @@ export default function ReaderScreen() {
                         accent={chromeTheme.accent}
                         accentText={chromeTheme.accentText}
                       />
-                    </M3Pressable>
+                    </FeedbackPressable>
                   ))}
                   {searchQuery.trim() && searchResults.length === 0 && (
                     <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
@@ -1771,7 +1771,7 @@ export default function ReaderScreen() {
             {panel === 'notes' && (
               <View style={styles.panelBody}>
                 <View style={styles.annotationQuickActions}>
-                  <M3Pressable
+                  <FeedbackPressable
                     captureTouches
                     onPress={addBookmark}
                     feedback={currentBookmark ? 'subtle' : 'standard'}
@@ -1790,7 +1790,7 @@ export default function ReaderScreen() {
                     <Text style={[styles.annotationActionBody, { color: currentBookmark ? chromeTheme.accentText : chromeTheme.muted }]}>
                       {currentBookmark ? '已标记当前章' : '收藏当前位置'}
                     </Text>
-                  </M3Pressable>
+                  </FeedbackPressable>
                 </View>
                 <TextInput
                   value={noteDraft}
@@ -1800,14 +1800,14 @@ export default function ReaderScreen() {
                   multiline
                   style={[styles.panelInput, styles.noteInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
                 />
-                <M3Pressable captureTouches onPress={saveNote} feedback="standard" style={[styles.saveNoteButton, { backgroundColor: chromeTheme.accent }]}>
+                <FeedbackPressable captureTouches onPress={saveNote} feedback="standard" style={[styles.saveNoteButton, { backgroundColor: chromeTheme.accent }]}>
                   <Text style={[styles.saveNoteText, { color: chromeTheme.accentText }]}>保存笔记</Text>
-                </M3Pressable>
+                </FeedbackPressable>
                 <View style={styles.filterRow}>
                   {annotationFilters.map((filter) => {
                     const active = annotationFilter === filter.value;
                     return (
-                      <M3FilterChip
+                      <FilterChip
                         key={filter.value}
                         theme={panelControlTheme}
                         selected={active}
@@ -1821,7 +1821,7 @@ export default function ReaderScreen() {
                 </View>
                 <ScrollView contentContainerStyle={styles.panelList}>
                   {filteredAnnotations.map((annotation) => (
-                    <M3Pressable
+                    <FeedbackPressable
                       key={annotation.id}
                       onPress={() => goToAnnotation(annotation)}
                       feedback="standard"
@@ -1838,7 +1838,7 @@ export default function ReaderScreen() {
                       </Text>
                       <View style={styles.annotationActions}>
                         <Text style={[styles.annotationHint, { color: chromeTheme.muted }]}>点按跳转</Text>
-                        <M3Pressable
+                        <FeedbackPressable
                           hitSlop={8}
                           feedback="subtle"
                           accessibilityRole="button"
@@ -1848,9 +1848,9 @@ export default function ReaderScreen() {
                             setAnnotations(await listAnnotations(db, book.id));
                           }}>
                           <Text style={[styles.deleteText, { color: chromeTheme.accent }]}>删除</Text>
-                        </M3Pressable>
+                        </FeedbackPressable>
                       </View>
-                    </M3Pressable>
+                    </FeedbackPressable>
                   ))}
                   {filteredAnnotations.length === 0 && (
                     <View style={[styles.emptyPanelState, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
@@ -1866,7 +1866,7 @@ export default function ReaderScreen() {
 
             {panel === 'settings' && (
               <View style={styles.settingsPanel}>
-                <M3SegmentedControl
+                <SegmentedControl
                   theme={panelControlTheme}
                   value={preferences.readingMode}
                   options={(['scroll', 'page'] as const).map((mode) => ({
@@ -1877,7 +1877,7 @@ export default function ReaderScreen() {
                 />
                 <View style={styles.themeRow}>
                   {brand.readerThemeOrder.map((theme) => (
-                    <M3Pressable
+                    <FeedbackPressable
                       key={theme}
                       captureTouches
                       onPress={() => updatePreference({ ...preferences, readerTheme: theme })}
@@ -1901,7 +1901,7 @@ export default function ReaderScreen() {
                       <Text style={[styles.themeChipText, { color: preferences.readerTheme === theme ? brand.readerThemes[theme].onPrimaryContainer : brand.readerThemes[theme].text }]}>
                         {themeLabels[theme]}
                       </Text>
-                    </M3Pressable>
+                    </FeedbackPressable>
                   ))}
                 </View>
                 <View style={styles.fontRow}>
@@ -1909,7 +1909,7 @@ export default function ReaderScreen() {
                     const active = preferences.fontFamily === fontFamily;
                     const foreground = active ? chromeTheme.accentText : chromeTheme.text;
                     return (
-                      <M3Pressable
+                      <FeedbackPressable
                         key={fontFamily}
                         captureTouches
                         onPress={() => updatePreference({ ...preferences, fontFamily })}
@@ -1939,11 +1939,11 @@ export default function ReaderScreen() {
                         <Text numberOfLines={1} style={[styles.fontChipLabel, { color: foreground }]}>
                           {readerFontFamilies[fontFamily].label}
                         </Text>
-                      </M3Pressable>
+                      </FeedbackPressable>
                     );
                   })}
                 </View>
-                <M3Stepper
+                <Stepper
                   theme={panelControlTheme}
                   label="字号"
                   value={String(preferences.fontSize)}
@@ -1951,7 +1951,7 @@ export default function ReaderScreen() {
                   onMinus={() => updatePreference({ ...preferences, fontSize: Math.max(15, preferences.fontSize - 1) })}
                   onPlus={() => updatePreference({ ...preferences, fontSize: Math.min(28, preferences.fontSize + 1) })}
                 />
-                <M3Stepper
+                <Stepper
                   theme={panelControlTheme}
                   label="行距"
                   value={preferences.lineHeight.toFixed(1)}
@@ -1972,8 +1972,8 @@ export default function ReaderScreen() {
           style={[styles.noteComposerLayer, { paddingBottom: noteComposerBottomInset }]}>
           <Pressable accessibilityRole="button" accessibilityLabel="关闭笔记" onPress={dismissSelectionNote} style={styles.noteComposerBackdrop} />
           <Animated.View
-            entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
-            exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.fadeShortOut()}
+            entering={reduceMotion ? FadeIn.duration(80) : appMotion.fadeShortIn()}
+            exiting={reduceMotion ? FadeOut.duration(80) : appMotion.fadeShortOut()}
             style={[styles.noteComposerCard, noteWindowDragStyle, { backgroundColor: readerTheme.surfaceSolid, borderColor: readerTheme.line }]}>
             <View {...noteWindowPanResponder.panHandlers} style={styles.noteComposerHeader}>
               <View style={styles.noteComposerTitleRow}>
@@ -2042,8 +2042,8 @@ export default function ReaderScreen() {
           />
           <Animated.View
             pointerEvents="auto"
-            entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
-            exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.fadeShortOut()}
+            entering={reduceMotion ? FadeIn.duration(80) : appMotion.fadeShortIn()}
+            exiting={reduceMotion ? FadeOut.duration(80) : appMotion.fadeShortOut()}
             style={[
               styles.notePopoverCard,
               notePopoverStyle,
@@ -2114,8 +2114,8 @@ export default function ReaderScreen() {
 
       {notice && (
         <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn()}
-          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.fadeShortOut()}
+          entering={reduceMotion ? FadeIn.duration(80) : appMotion.fadeShortIn()}
+          exiting={reduceMotion ? FadeOut.duration(80) : appMotion.fadeShortOut()}
           style={[styles.noticeToast, { top: Math.max(96, insets.top + 74) }]}>
           <Text style={styles.noticeToastText}>{notice}</Text>
         </Animated.View>

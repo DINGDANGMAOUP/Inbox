@@ -177,7 +177,7 @@ def draw_logo_board() -> None:
     image.save(ASSETS / "brand" / "moyu-logo-board.png")
 
 
-def material_background(size: tuple[int, int], palette: dict[str, str]) -> Image.Image:
+def theme_background(size: tuple[int, int], palette: dict[str, str]) -> Image.Image:
     image = vertical_gradient(size, palette["gradient"])
     image = add_texture(image, 16)
     draw = ImageDraw.Draw(image, "RGBA")
@@ -194,8 +194,8 @@ def material_background(size: tuple[int, int], palette: dict[str, str]) -> Image
     return image
 
 
-def material_cover(size: tuple[int, int], palette: dict[str, str]) -> Image.Image:
-    image = material_background(size, palette)
+def theme_cover(size: tuple[int, int], palette: dict[str, str]) -> Image.Image:
+    image = theme_background(size, palette)
     draw = ImageDraw.Draw(image, "RGBA")
     width, height = size
     draw.rounded_rectangle((width * 0.10, height * 0.10, width * 0.90, height * 0.86), radius=int(width * 0.16), fill=hex_to_rgb(palette["surface"]) + (160,), outline=hex_to_rgb(palette["outline"]) + (56,), width=2)
@@ -238,9 +238,9 @@ def save_theme_assets() -> None:
         },
     }
     for name, palette in palettes.items():
-        material_background((497, 1004), palette).save(ASSETS / "themes" / f"{name}-background.png")
-        material_cover((497, 760), palette).save(ASSETS / "themes" / f"{name}-cover.png")
-    material_background((1200, 840), palettes["mist"]).save(ASSETS / "themes" / "moyu-material-board.png")
+        theme_background((497, 1004), palette).save(ASSETS / "themes" / f"{name}-background.png")
+        theme_cover((497, 760), palette).save(ASSETS / "themes" / f"{name}-cover.png")
+    theme_background((1200, 840), palettes["mist"]).save(ASSETS / "themes" / "moyu-theme-board.png")
 
 
 def main() -> None:

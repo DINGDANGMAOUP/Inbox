@@ -5,11 +5,11 @@ import { ActivityIndicator, BackHandler, Keyboard, StyleSheet, Text, TextInput, 
 import Animated from 'react-native-reanimated';
 
 import { LibraryBookRow } from '@/components/reader/library-book-row';
-import { M3PageHeader, M3Screen, M3StatePanel } from '@/components/reader/m3';
-import { m3Motion } from '@/components/reader/motion-presets';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol } from '@/components/reader/material-symbol';
-import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
+import { PageHeader, AppScreen, StatePanel } from '@/components/ui/app-ui';
+import { appMotion } from '@/components/ui/motion-presets';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol } from '@/components/ui/material-symbol';
+import { useRouteSlideTransition } from '@/components/ui/route-slide-transition';
 import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
 import { appThemeAssets } from '@/constants/theme-assets';
@@ -101,7 +101,7 @@ export default function SearchScreen() {
 
   const listHeader = (
     <View style={[styles.searchListHeader, (loading || hasQuery) && styles.searchListHeaderWithBody]}>
-      <M3PageHeader
+      <PageHeader
         theme={theme}
         title="搜索书架"
         subtitle={resultLabel}
@@ -123,9 +123,9 @@ export default function SearchScreen() {
             style={[styles.searchInput, { color: theme.text }]}
           />
           {query ? (
-            <M3Pressable captureTouches hitSlop={8} onPress={() => setQuery('')} feedback="subtle" accessibilityLabel="清除搜索" style={styles.clearButton}>
+            <FeedbackPressable captureTouches hitSlop={8} onPress={() => setQuery('')} feedback="subtle" accessibilityLabel="清除搜索" style={styles.clearButton}>
               <MaterialSymbol name="close" color={theme.muted} description="清除搜索" decorative size={17} />
-            </M3Pressable>
+            </FeedbackPressable>
           ) : null}
         </View>
       </View>
@@ -133,23 +133,23 @@ export default function SearchScreen() {
   );
 
   const emptyList = loading ? (
-    <M3StatePanel theme={theme} title="正在读取书架" artwork={<ActivityIndicator color={theme.accent} />} />
+    <StatePanel theme={theme} title="正在读取书架" artwork={<ActivityIndicator color={theme.accent} />} />
   ) : hasQuery ? (
-    <Animated.View entering={m3Motion.fadeDown()} style={[styles.noResultPanel, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
+    <Animated.View entering={appMotion.fadeDown()} style={[styles.noResultPanel, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
       <View style={[styles.noResultIcon, { backgroundColor: theme.primaryContainer }]}>
         <MaterialSymbol name="magnifyingglass" color={theme.onPrimaryContainer} description="没有结果" decorative size={24} />
       </View>
       <Text style={[styles.noResultTitle, { color: theme.text }]}>没有找到这本书</Text>
       <Text style={[styles.noResultBody, { color: theme.muted }]}>换个书名、作者或章节关键词试试。</Text>
-      <M3Pressable onPress={() => setQuery('')} feedback="subtle" style={[styles.resetButton, { backgroundColor: theme.primaryContainer }]}>
+      <FeedbackPressable onPress={() => setQuery('')} feedback="subtle" style={[styles.resetButton, { backgroundColor: theme.primaryContainer }]}>
         <Text style={[styles.resetButtonText, { color: theme.onPrimaryContainer }]}>清除搜索</Text>
-      </M3Pressable>
+      </FeedbackPressable>
     </Animated.View>
   ) : null;
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
-      <M3Screen
+      <AppScreen
         key={`search-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
@@ -167,7 +167,7 @@ export default function SearchScreen() {
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}
         />
-      </M3Screen>
+      </AppScreen>
     </Animated.View>
   );
 }

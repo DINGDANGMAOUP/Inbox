@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { motion } from '@/constants/motion';
-import { m3Easing } from '@/components/reader/motion-presets';
+import { appEasing } from '@/components/ui/motion-presets';
 
 export function useRouteSlideTransition(width: number) {
   const closingRef = useRef(false);
@@ -12,7 +12,7 @@ export function useRouteSlideTransition(width: number) {
   const duration = reduceMotion ? 0 : motion.duration.medium;
 
   useEffect(() => {
-    progress.set(withTiming(0, { duration, easing: m3Easing.emphasizedDecelerate }));
+    progress.set(withTiming(0, { duration, easing: appEasing.emphasizedDecelerate }));
   }, [duration, progress]);
 
   const routeStyle = useAnimatedStyle(() => {
@@ -28,7 +28,7 @@ export function useRouteSlideTransition(width: number) {
       return;
     }
     closingRef.current = true;
-    progress.set(withTiming(1, { duration, easing: m3Easing.emphasizedAccelerate }));
+    progress.set(withTiming(1, { duration, easing: appEasing.emphasizedAccelerate }));
     setTimeout(() => router.back(), duration);
   }, [duration, progress]);
 

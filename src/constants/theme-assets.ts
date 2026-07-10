@@ -8,19 +8,19 @@ type ThemeAssetSet = {
 };
 
 type AppThemeAssetSet = ThemeAssetSet & {
-  materialBoard: ImageSourcePropType;
+  themeBoard: ImageSourcePropType;
 };
 
 export const appThemeAssets: Record<ResolvedAppTheme, AppThemeAssetSet> = {
   mist: {
     background: require('../../assets/images/themes/mist-background.png'),
     cover: require('../../assets/images/themes/mist-cover.png'),
-    materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
+    themeBoard: require('../../assets/images/themes/moyu-theme-board.png'),
   },
   deep: {
     background: require('../../assets/images/themes/deep-background.png'),
     cover: require('../../assets/images/themes/deep-cover.png'),
-    materialBoard: require('../../assets/images/themes/moyu-material-board.png'),
+    themeBoard: require('../../assets/images/themes/moyu-theme-board.png'),
   },
 };
 

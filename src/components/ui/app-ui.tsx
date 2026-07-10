@@ -12,11 +12,11 @@ import Animated from 'react-native-reanimated';
 
 import { brand } from '@/constants/brand';
 import { motion } from '@/constants/motion';
-import { m3Motion } from '@/components/reader/motion-presets';
-import { M3Pressable } from '@/components/reader/m3-pressable';
-import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
+import { appMotion } from '@/components/ui/motion-presets';
+import { FeedbackPressable } from '@/components/ui/feedback-pressable';
+import { MaterialSymbol, type MaterialSymbolName } from '@/components/ui/material-symbol';
 
-type M3ThemeToken = {
+type AppUiTheme = {
   surface: string;
   surfaceSolid?: string;
   surfaceContainer: string;
@@ -30,14 +30,14 @@ type M3ThemeToken = {
   line: string;
 };
 
-export function M3Screen({
+export function AppScreen({
   theme,
   backgroundSource,
   overlayColor,
   children,
   style,
 }: {
-  theme: M3ThemeToken & { background?: string; overlay?: string };
+  theme: AppUiTheme & { background?: string; overlay?: string };
   backgroundSource: ImageSourcePropType;
   overlayColor?: string;
   children: ReactNode;
@@ -52,20 +52,20 @@ export function M3Screen({
   );
 }
 
-export function M3PageHeader({
+export function PageHeader({
   theme,
   title,
   subtitle,
   onBack,
 }: {
-  theme: M3ThemeToken;
+  theme: AppUiTheme;
   title: string;
   subtitle: string;
   onBack: () => void;
 }) {
   return (
-    <Animated.View entering={m3Motion.fadeDown()} style={styles.pageHeader}>
-      <M3Pressable
+    <Animated.View entering={appMotion.fadeDown()} style={styles.pageHeader}>
+      <FeedbackPressable
         captureTouches
         feedback="subtle"
         hitSlop={8}
@@ -73,7 +73,7 @@ export function M3PageHeader({
         onPress={onBack}
         style={[styles.pageBackButton, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }]}>
         <MaterialSymbol name="chevron.left" color={theme.text} description="返回" decorative size={20} />
-      </M3Pressable>
+      </FeedbackPressable>
       <View style={styles.pageTitleCopy}>
         <Text numberOfLines={1} style={[styles.pageTitle, { color: theme.text }]}>{title}</Text>
         <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.pageSubtitle, { color: theme.muted }]}>{subtitle}</Text>
@@ -82,7 +82,7 @@ export function M3PageHeader({
   );
 }
 
-export function M3StatePanel({
+export function StatePanel({
   theme,
   title,
   body,
@@ -91,7 +91,7 @@ export function M3StatePanel({
   order = 0,
   style,
 }: {
-  theme: M3ThemeToken;
+  theme: AppUiTheme;
   title: string;
   body?: string;
   artwork?: ReactNode;
@@ -101,8 +101,8 @@ export function M3StatePanel({
 }) {
   return (
     <Animated.View
-      entering={m3Motion.fadeDown(order * motion.stagger.section)}
-      layout={m3Motion.layoutMedium()}
+      entering={appMotion.fadeDown(order * motion.stagger.section)}
+      layout={appMotion.layoutMedium()}
       style={[styles.statePanel, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }, style]}>
       {artwork}
       <View style={styles.stateCopy}>
@@ -114,7 +114,7 @@ export function M3StatePanel({
   );
 }
 
-export function M3Stepper({
+export function Stepper({
   theme,
   label,
   value,
@@ -122,7 +122,7 @@ export function M3Stepper({
   onPlus,
   compact = false,
 }: {
-  theme: M3ThemeToken;
+  theme: AppUiTheme;
   label: string;
   value: string;
   onMinus: () => void;
@@ -139,7 +139,7 @@ export function M3Stepper({
         <Text style={[styles.stepperValueInline, { color: theme.muted }]}>{value}</Text>
       </View>
       <View style={styles.stepperControls}>
-        <M3Pressable
+        <FeedbackPressable
           accessibilityLabel={`减少${label}`}
           captureTouches
           hitSlop={8}
@@ -147,11 +147,11 @@ export function M3Stepper({
           feedback="strong"
           style={[styles.roundControl, { backgroundColor: controlBackground }]}>
           <MaterialSymbol name="minus" color={controlColor} description={`减少${label}`} decorative size={22} />
-        </M3Pressable>
+        </FeedbackPressable>
         <View style={[styles.stepperValuePill, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }]}>
           <Text style={[styles.stepperValue, { color: theme.text }]}>{value}</Text>
         </View>
-        <M3Pressable
+        <FeedbackPressable
           accessibilityLabel={`增加${label}`}
           captureTouches
           hitSlop={8}
@@ -159,13 +159,13 @@ export function M3Stepper({
           feedback="strong"
           style={[styles.roundControl, { backgroundColor: controlBackground }]}>
           <MaterialSymbol name="plus" color={controlColor} description={`增加${label}`} decorative size={22} />
-        </M3Pressable>
+        </FeedbackPressable>
       </View>
     </View>
   );
 }
 
-export function M3FilterChip({
+export function FilterChip({
   theme,
   label,
   selected,
@@ -174,7 +174,7 @@ export function M3FilterChip({
   icon,
   compact = false,
 }: {
-  theme: M3ThemeToken;
+  theme: AppUiTheme;
   label: string;
   selected: boolean;
   onPress: () => void;
@@ -186,7 +186,7 @@ export function M3FilterChip({
   const background = selected ? theme.primaryContainer : theme.surface;
 
   return (
-    <M3Pressable
+    <FeedbackPressable
       captureTouches
       onPress={onPress}
       feedback={selected ? 'subtle' : 'standard'}
@@ -200,17 +200,17 @@ export function M3FilterChip({
       <Text numberOfLines={1} style={[styles.filterChipText, { color: foreground }]}>
         {count === undefined ? label : `${label} ${count}`}
       </Text>
-    </M3Pressable>
+    </FeedbackPressable>
   );
 }
 
-export function M3SegmentedControl<Value extends string>({
+export function SegmentedControl<Value extends string>({
   theme,
   value,
   options,
   onChange,
 }: {
-  theme: M3ThemeToken;
+  theme: AppUiTheme;
   value: Value;
   options: { value: Value; title: string; body?: string }[];
   onChange: (value: Value) => void;
@@ -220,7 +220,7 @@ export function M3SegmentedControl<Value extends string>({
       {options.map((option) => {
         const active = value === option.value;
         return (
-          <M3Pressable
+          <FeedbackPressable
             key={option.value}
             captureTouches
             onPress={() => onChange(option.value)}
@@ -239,7 +239,7 @@ export function M3SegmentedControl<Value extends string>({
                 {option.body}
               </Text>
             ) : null}
-          </M3Pressable>
+          </FeedbackPressable>
         );
       })}
     </View>

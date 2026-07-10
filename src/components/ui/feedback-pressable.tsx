@@ -2,20 +2,20 @@ import { StyleSheet, Pressable, type PressableProps, type PressableStateCallback
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { motion } from '@/constants/motion';
-import { m3Easing } from '@/components/reader/motion-presets';
+import { appEasing } from '@/components/ui/motion-presets';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-type M3PressableFeedback = 'subtle' | 'standard' | 'strong' | 'none';
+type PressFeedback = 'subtle' | 'standard' | 'strong' | 'none';
 
-type M3PressableProps = Omit<PressableProps, 'style'> & {
+type FeedbackPressableProps = Omit<PressableProps, 'style'> & {
   captureTouches?: boolean;
-  feedback?: M3PressableFeedback;
+  feedback?: PressFeedback;
   stateLayerColor?: string;
   style?: StyleProp<ViewStyle>;
 };
 
-function feedbackScale(feedback: M3PressableFeedback) {
+function feedbackScale(feedback: PressFeedback) {
   switch (feedback) {
     case 'subtle':
       return motion.scale.pressSubtle;
@@ -28,7 +28,7 @@ function feedbackScale(feedback: M3PressableFeedback) {
   }
 }
 
-export function M3Pressable({
+export function FeedbackPressable({
   captureTouches = false,
   feedback = 'standard',
   stateLayerColor = 'rgba(205, 232, 208, 0.18)',
@@ -41,7 +41,7 @@ export function M3Pressable({
   onPressOut,
   children,
   ...props
-}: M3PressableProps) {
+}: FeedbackPressableProps) {
   const pressed = useSharedValue(0);
   const reduceMotion = useReducedMotion();
   const targetScale = reduceMotion ? 1 : feedbackScale(feedback);
@@ -70,11 +70,11 @@ export function M3Pressable({
       disabled={disabled}
       accessibilityRole={accessibilityRole}
       onPressIn={(event) => {
-        pressed.set(withTiming(1, { duration: reduceMotion ? 0 : motion.duration.pressIn, easing: m3Easing.standard }));
+        pressed.set(withTiming(1, { duration: reduceMotion ? 0 : motion.duration.pressIn, easing: appEasing.standard }));
         onPressIn?.(event);
       }}
       onPressOut={(event) => {
-        pressed.set(withTiming(0, { duration: reduceMotion ? 0 : motion.duration.pressOut, easing: m3Easing.emphasizedDecelerate }));
+        pressed.set(withTiming(0, { duration: reduceMotion ? 0 : motion.duration.pressOut, easing: appEasing.emphasizedDecelerate }));
         onPressOut?.(event);
       }}
       style={[style, animatedStyle]}

@@ -13,13 +13,13 @@ import {
 import Animated from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 
-import { M3PageHeader, M3Screen } from "@/components/reader/m3";
-import { M3Pressable } from "@/components/reader/m3-pressable";
+import { PageHeader, AppScreen } from "@/components/ui/app-ui";
+import { FeedbackPressable } from "@/components/ui/feedback-pressable";
 import {
   MaterialSymbol,
   type MaterialSymbolName,
-} from "@/components/reader/material-symbol";
-import { useRouteSlideTransition } from "@/components/reader/route-slide-transition";
+} from "@/components/ui/material-symbol";
+import { useRouteSlideTransition } from "@/components/ui/route-slide-transition";
 import { brand } from "@/constants/brand";
 import { appThemeAssets } from "@/constants/theme-assets";
 import { useReaderPreferences } from "@/hooks/use-reader-preferences";
@@ -122,7 +122,7 @@ export default function StorageScreen() {
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
-      <M3Screen
+      <AppScreen
         key={`storage-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
@@ -137,7 +137,7 @@ export default function StorageScreen() {
             width >= 700 && styles.contentWide,
           ]}
         >
-          <M3PageHeader
+          <PageHeader
             theme={theme}
             title="存储空间"
             subtitle="书籍、缓存和阅读记录"
@@ -154,12 +154,12 @@ export default function StorageScreen() {
             <View style={[styles.loadingPanel, { borderColor: theme.line, backgroundColor: theme.surfaceSolid }]}>
               <MaterialSymbol name="error" color={theme.error} decorative size={26} />
               <Text selectable style={[styles.errorText, { color: theme.text }]}>{error}</Text>
-              <M3Pressable
+              <FeedbackPressable
                 onPress={() => refreshStorage().catch((nextError: unknown) => setError(errorMessage(nextError)))}
                 style={[styles.retryButton, { backgroundColor: theme.accent }]}
               >
                 <Text style={[styles.retryText, { color: theme.accentText }]}>重试</Text>
-              </M3Pressable>
+              </FeedbackPressable>
             </View>
           ) : null}
 
@@ -211,7 +211,7 @@ export default function StorageScreen() {
             </>
           ) : null}
         </ScrollView>
-      </M3Screen>
+      </AppScreen>
     </Animated.View>
   );
 }
@@ -348,7 +348,7 @@ function StorageCard({
         </View>
         <Text numberOfLines={1} style={[styles.cardTitle, { color: theme.text }]}>{title}</Text>
         {actionLabel ? (
-          <M3Pressable
+          <FeedbackPressable
             disabled={actionDisabled}
             onPress={onPress}
             feedback="subtle"
@@ -369,7 +369,7 @@ function StorageCard({
                 {actionLabel}
               </Text>
             )}
-          </M3Pressable>
+          </FeedbackPressable>
         ) : null}
       </View>
       <Text selectable numberOfLines={1} adjustsFontSizeToFit style={[styles.cardValue, { color }]}>

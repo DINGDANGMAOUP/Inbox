@@ -27,7 +27,7 @@ bun run check
 
 ```bash
 python3 -m pip install -r scripts/requirements-assets.txt
-python3 scripts/generate_m3_assets.py
+python3 scripts/generate_app_assets.py
 ```
 
 `scripts/check-*.ts` 是 EPUB、TXT、章节切分和 Readium 内部出版物的轻量回归检查，统一由 `bun run test` 执行。`scripts/set-android-release-version.mjs` 同步更新 `app.json` 与 `package.json`，供 Android 发布流程使用。

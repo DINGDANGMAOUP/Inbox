@@ -21,13 +21,13 @@ import {
 } from "react-native";
 import Animated from "react-native-reanimated";
 
-import { M3PageHeader, M3Screen } from "@/components/reader/m3";
-import { M3Pressable } from "@/components/reader/m3-pressable";
+import { PageHeader, AppScreen } from "@/components/ui/app-ui";
+import { FeedbackPressable } from "@/components/ui/feedback-pressable";
 import {
   MaterialSymbol,
   type MaterialSymbolName,
-} from "@/components/reader/material-symbol";
-import { useRouteSlideTransition } from "@/components/reader/route-slide-transition";
+} from "@/components/ui/material-symbol";
+import { useRouteSlideTransition } from "@/components/ui/route-slide-transition";
 import { brandAssets } from "@/constants/brand-assets";
 import { brand } from "@/constants/brand";
 import { appThemeAssets } from "@/constants/theme-assets";
@@ -205,7 +205,7 @@ export default function AboutScreen() {
 
   return (
     <Animated.View style={[styles.routeShell, routeStyle]}>
-      <M3Screen
+      <AppScreen
         key={`about-screen-${resolvedAppTheme}`}
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
@@ -220,7 +220,7 @@ export default function AboutScreen() {
             width >= 700 && styles.contentWide,
           ]}
         >
-          <M3PageHeader
+          <PageHeader
             theme={theme}
             title="关于墨屿"
             subtitle="本地优先的安静阅读器"
@@ -319,7 +319,7 @@ export default function AboutScreen() {
             </Text>
           </View>
         </ScrollView>
-      </M3Screen>
+      </AppScreen>
     </Animated.View>
   );
 }
@@ -342,7 +342,7 @@ function AboutMenuRow({
   onPress: () => void;
 }) {
   return (
-    <M3Pressable
+    <FeedbackPressable
       disabled={disabled}
       onPress={onPress}
       feedback="subtle"
@@ -384,7 +384,7 @@ function AboutMenuRow({
           size={18}
         />
       )}
-    </M3Pressable>
+    </FeedbackPressable>
   );
 }
 
