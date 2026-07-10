@@ -5,8 +5,7 @@ import { ActivityIndicator, BackHandler, Keyboard, StyleSheet, Text, TextInput, 
 import Animated from 'react-native-reanimated';
 
 import { LibraryBookRow } from '@/components/reader/library-book-row';
-import { IconButton } from '@/components/reader/icon-button';
-import { M3Screen, M3StatePanel } from '@/components/reader/m3';
+import { M3PageHeader, M3Screen, M3StatePanel } from '@/components/reader/m3';
 import { m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol } from '@/components/reader/material-symbol';
@@ -102,16 +101,13 @@ export default function SearchScreen() {
 
   const listHeader = (
     <View style={[styles.searchListHeader, (loading || hasQuery) && styles.searchListHeaderWithBody]}>
+      <M3PageHeader
+        theme={theme}
+        title="搜索书架"
+        subtitle={resultLabel}
+        onBack={closeSearch}
+      />
       <View style={[styles.searchHeader, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-        <IconButton
-          icon="chevron.left"
-          label="返回"
-          tone="quiet"
-          tintColor={theme.text}
-          size="icon"
-          style={[styles.headerButton, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}
-          onPress={closeSearch}
-        />
         <View style={[styles.searchField, { backgroundColor: theme.surfaceContainer, borderColor: theme.line }]}>
           <MaterialSymbol name="magnifyingglass" color={theme.accent} description="搜索" decorative size={18} />
           <TextInput
@@ -132,12 +128,6 @@ export default function SearchScreen() {
             </M3Pressable>
           ) : null}
         </View>
-      </View>
-
-      <View style={styles.searchTitleBlock}>
-        <Text style={[styles.kicker, { color: theme.accent }]}>SEARCH LIBRARY</Text>
-        <Text style={[styles.title, { color: theme.text }]}>搜索书架</Text>
-        <Text style={[styles.subtitle, { color: theme.muted }]}>{resultLabel}</Text>
       </View>
     </View>
   );
@@ -207,24 +197,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   searchHeader: {
-    minHeight: 66,
+    minHeight: 68,
     borderRadius: brand.radius.large,
     borderCurve: 'continuous',
     borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
     padding: 10,
     boxShadow: brand.shadow.card,
-  },
-  headerButton: {
-    width: 46,
-    height: 46,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   searchField: {
     flex: 1,
@@ -251,26 +229,6 @@ const styles = StyleSheet.create({
     borderRadius: brand.radius.round,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  searchTitleBlock: {
-    gap: 4,
-    paddingHorizontal: 8,
-  },
-  kicker: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  title: {
-    fontSize: 34,
-    lineHeight: 38,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  subtitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0,
   },
   bookSeparator: {
     height: 12,

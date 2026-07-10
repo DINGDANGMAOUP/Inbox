@@ -13,7 +13,6 @@ import {
   Alert,
   BackHandler,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,9 +20,8 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { M3Screen } from "@/components/reader/m3";
+import { M3PageHeader, M3Screen } from "@/components/reader/m3";
 import { M3Pressable } from "@/components/reader/m3-pressable";
 import {
   MaterialSymbol,
@@ -57,7 +55,6 @@ type AboutTheme = (typeof brand.appThemes)[keyof typeof brand.appThemes];
 export default function AboutScreen() {
   const { resolvedAppTheme } = useReaderPreferences();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const { closeRoute, routeStyle } = useRouteSlideTransition(width);
   const theme = brand.appThemes[resolvedAppTheme];
   const installedVersion = useMemo(() => getInstalledAppVersion(), []);
@@ -67,7 +64,6 @@ export default function AboutScreen() {
   const [downloadProgress, setDownloadProgress] =
     useState<UpdateDownloadProgress>();
   const isDeepTheme = resolvedAppTheme === "deep";
-  const topBarHeight = insets.top + 56;
 
   const handleBack = useCallback(() => {
     closeRoute();
@@ -217,51 +213,21 @@ export default function AboutScreen() {
           isDeepTheme ? "rgba(8, 9, 6, 0.46)" : "rgba(250, 248, 242, 0.93)"
         }
       >
-        <View
-          style={[
-            styles.navBar,
-            { height: topBarHeight, paddingTop: insets.top },
-          ]}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="返回"
-            hitSlop={16}
-            pressRetentionOffset={18}
-            android_ripple={{
-              color: "rgba(47, 107, 79, 0.14)",
-              borderless: true,
-              radius: 28,
-            }}
-            style={({ pressed }) => [
-              styles.backButton,
-              pressed && styles.backButtonPressed,
-            ]}
-            onPress={handleBack}
-          >
-            <View pointerEvents="none" style={styles.backButtonIcon}>
-              <Text style={[styles.backButtonGlyph, { color: theme.text }]}>
-                ‹
-              </Text>
-            </View>
-          </Pressable>
-          <Text
-            pointerEvents="none"
-            numberOfLines={1}
-            style={[styles.navTitle, { color: theme.text }]}
-          >
-            关于墨屿
-          </Text>
-        </View>
         <ScrollView
-          contentInsetAdjustmentBehavior="never"
+          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={[
             styles.content,
-            { paddingTop: topBarHeight + 32 },
             width >= 700 && styles.contentWide,
           ]}
         >
-          <View style={styles.identity}>
+          <M3PageHeader
+            theme={theme}
+            title="关于墨屿"
+            subtitle="本地优先的安静阅读器"
+            onBack={handleBack}
+          />
+
+          <View style={[styles.identity, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
             <View
               style={[
                 styles.logoPlate,
@@ -283,7 +249,7 @@ export default function AboutScreen() {
             </Text>
           </View>
 
-          <View style={[styles.menuGroup, { borderTopColor: theme.line }]}>
+          <View style={[styles.menuGroup, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
             <AboutMenuRow
               theme={theme}
               title="功能介绍"
@@ -592,62 +558,23 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 20,
+    paddingTop: 44,
     paddingBottom: 96,
+    gap: 22,
   },
   contentWide: {
     width: "100%",
-    maxWidth: 560,
+    maxWidth: 820,
     alignSelf: "center",
-  },
-  navBar: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    left: 0,
-    zIndex: 10,
-    justifyContent: "center",
-  },
-  backButton: {
-    marginLeft: 4,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backButtonPressed: {
-    opacity: 0.68,
-  },
-  backButtonIcon: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backButtonGlyph: {
-    marginLeft: -2,
-    marginTop: -2,
-    fontSize: 38,
-    lineHeight: 38,
-    fontWeight: "500",
-    letterSpacing: 0,
-  },
-  navTitle: {
-    position: "absolute",
-    left: 80,
-    right: 80,
-    bottom: 16,
-    textAlign: "center",
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: "800",
-    letterSpacing: 0,
   },
   identity: {
     alignItems: "center",
-    paddingTop: 22,
-    paddingBottom: 66,
+    borderRadius: brand.radius.extraLarge,
+    borderCurve: "continuous",
+    borderWidth: 1,
+    padding: 24,
+    boxShadow: brand.shadow.card,
   },
   logoPlate: {
     width: 84,
@@ -663,7 +590,7 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   appName: {
-    marginTop: 30,
+    marginTop: 18,
     fontSize: 28,
     lineHeight: 34,
     fontWeight: "900",
@@ -677,7 +604,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   menuGroup: {
-    borderTopWidth: 1,
+    borderRadius: brand.radius.large,
+    borderCurve: "continuous",
+    borderWidth: 1,
+    overflow: "hidden",
+    boxShadow: brand.shadow.card,
   },
   menuRow: {
     minHeight: 82,
@@ -685,6 +616,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+    paddingHorizontal: 16,
   },
   menuIcon: {
     width: 38,
@@ -736,7 +668,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     marginTop: "auto",
-    paddingTop: 92,
+    paddingTop: 34,
     alignItems: "center",
     gap: 8,
   },

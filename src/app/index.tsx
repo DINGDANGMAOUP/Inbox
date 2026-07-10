@@ -56,12 +56,14 @@ function DrawerMenuItem({
   icon,
   title,
   detail,
+  last = false,
   onPress,
 }: {
   theme: AppThemeToken;
   icon: MaterialSymbolName;
   title: string;
   detail: string;
+  last?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -70,9 +72,9 @@ function DrawerMenuItem({
       feedback="subtle"
       accessibilityLabel={`${title}，${detail}`}
       stateLayerColor="rgba(47, 107, 79, 0.14)"
-      style={[styles.drawerItem, { borderBottomColor: theme.line }]}>
-      <View style={[styles.drawerItemIcon, { backgroundColor: theme.surfaceContainer }]}>
-        <MaterialSymbol name={icon} color={theme.accent} description={title} decorative size={18} />
+      style={[styles.drawerItem, last && styles.drawerItemLast, { borderBottomColor: theme.line }]}>
+      <View style={[styles.drawerItemIcon, { backgroundColor: theme.primaryContainer }]}>
+        <MaterialSymbol name={icon} color={theme.onPrimaryContainer} description={title} decorative size={18} />
       </View>
       <View style={styles.drawerItemCopy}>
         <Text style={[styles.drawerItemTitle, { color: theme.text }]}>{title}</Text>
@@ -153,9 +155,6 @@ export default function LibraryScreen() {
   const featuredProgressPercent = featuredBook ? bookProgressPercent(featuredBook) : null;
   const importProgressPercent = importProgress ? Math.round(importProgress.progress * 100) : 0;
 
-  const startedCount = useMemo(() => {
-    return books.filter(hasReadingProgress).length;
-  }, [books]);
   const selectedCount = selectedBookIds.size;
   const allVisibleSelected = filteredBooks.length > 0 && filteredBooks.every((book) => selectedBookIds.has(book.id));
   const selectedBooks = useMemo(() => books.filter((book) => selectedBookIds.has(book.id)), [books, selectedBookIds]);
@@ -542,7 +541,7 @@ export default function LibraryScreen() {
                 <BrandSeal />
                 <View style={styles.drawerBrandCopy}>
                   <Text style={[styles.drawerBrandTitle, { color: theme.text }]}>墨屿</Text>
-                  <Text style={[styles.drawerSubtitle, { color: theme.muted }]}>私人书架</Text>
+                  <Text style={[styles.drawerSubtitle, { color: theme.accent }]}>私人书架</Text>
                 </View>
               </View>
               <View pointerEvents="none" style={styles.drawerCloseButton}>
@@ -558,31 +557,11 @@ export default function LibraryScreen() {
               />
             </View>
 
-            <View style={[styles.drawerSummary, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>
-              <View style={styles.drawerMetric}>
-                <Text style={[styles.drawerMetricValue, { color: theme.text }]}>{books.length}</Text>
-                <Text style={[styles.drawerMetricLabel, { color: theme.muted }]}>藏书</Text>
-              </View>
-              <View style={[styles.drawerMetricDivider, { backgroundColor: theme.line }]} />
-              <View style={styles.drawerMetric}>
-                <Text style={[styles.drawerMetricValue, { color: theme.text }]}>{startedCount}</Text>
-                <Text style={[styles.drawerMetricLabel, { color: theme.muted }]}>在读</Text>
-              </View>
-            </View>
-
-            <View style={styles.drawerMenu}>
-              <Text style={[styles.drawerSectionLabel, { color: theme.accent }]}>导航</Text>
-              <View style={[styles.drawerMenuList, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>
-                <DrawerMenuItem theme={theme} icon="textformat.size" title="阅读器设置" detail="外观、排版和阅读方式" onPress={() => navigateFromDrawer('/settings')} />
-                <DrawerMenuItem theme={theme} icon="settings" title="应用设置" detail="界面主题和应用管理" onPress={() => navigateFromDrawer('/app-settings')} />
-                <DrawerMenuItem theme={theme} icon="storage" title="存储空间" detail="占用、缓存和阅读数据" onPress={() => navigateFromDrawer('/storage')} />
-                <DrawerMenuItem theme={theme} icon="info" title="关于墨屿" detail="版本、更新和协议" onPress={() => navigateFromDrawer('/about')} />
-              </View>
-            </View>
-
-            <View style={[styles.drawerFooter, { borderTopColor: theme.line }]}>
-              <MaterialSymbol name="bookmark" color={theme.accent} description="本地阅读" decorative size={16} />
-              <Text style={[styles.drawerFooterText, { color: theme.muted }]}>本地阅读 · 私密保存</Text>
+            <View style={[styles.drawerMenuList, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+              <DrawerMenuItem theme={theme} icon="textformat.size" title="阅读器设置" detail="外观、排版和阅读方式" onPress={() => navigateFromDrawer('/settings')} />
+              <DrawerMenuItem theme={theme} icon="settings" title="应用设置" detail="界面主题和应用管理" onPress={() => navigateFromDrawer('/app-settings')} />
+              <DrawerMenuItem theme={theme} icon="storage" title="存储空间" detail="占用、缓存和阅读数据" onPress={() => navigateFromDrawer('/storage')} />
+              <DrawerMenuItem last theme={theme} icon="info" title="关于墨屿" detail="版本、更新和协议" onPress={() => navigateFromDrawer('/about')} />
             </View>
           </Animated.View>
         </Animated.View>
@@ -1157,17 +1136,18 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 24,
     borderCurve: 'continuous',
     borderRightWidth: 1,
-    paddingHorizontal: 20,
-    gap: 22,
+    paddingHorizontal: 16,
+    gap: 16,
     boxShadow: '12px 0 24px rgba(7, 9, 7, 0.18)',
   },
   drawerHeader: {
     position: 'relative',
-    minHeight: 56,
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 14,
+    paddingHorizontal: 2,
   },
   drawerBrand: {
     flex: 1,
@@ -1220,56 +1200,25 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 18,
   },
-  drawerSummary: {
-    minHeight: 72,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  drawerMetric: {
-    flex: 1,
-    justifyContent: 'center',
-    gap: 2,
-  },
-  drawerMetricDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 36,
-  },
-  drawerMetricValue: {
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
-  drawerMetricLabel: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  drawerMenu: {
-    gap: 8,
-  },
-  drawerSectionLabel: {
-    fontSize: 11,
-    fontWeight: '900',
-    letterSpacing: 0,
-    paddingHorizontal: 0,
-  },
   drawerMenuList: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    overflow: 'hidden',
+    boxShadow: '0 8px 18px rgba(18, 20, 15, 0.06)',
   },
   drawerItem: {
     minHeight: 64,
     borderRadius: 0,
-    borderWidth: 0,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  drawerItemLast: {
+    borderBottomWidth: 0,
   },
   drawerItemIcon: {
     width: 36,
@@ -1301,18 +1250,5 @@ const styles = StyleSheet.create({
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  drawerFooter: {
-    marginTop: 'auto',
-    minHeight: 52,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  drawerFooterText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0,
   },
 });

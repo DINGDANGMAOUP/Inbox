@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,9 +11,9 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Animated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle } from "react-native-svg";
 
-import { M3Screen } from "@/components/reader/m3";
+import { M3PageHeader, M3Screen } from "@/components/reader/m3";
 import { M3Pressable } from "@/components/reader/m3-pressable";
 import {
   MaterialSymbol,
@@ -33,15 +32,13 @@ import {
 
 type StorageTheme = (typeof brand.appThemes)[keyof typeof brand.appThemes];
 type BusyAction = "cache" | "reading" | null;
-// 
+
 export default function StorageScreen() {
   const db = useSQLiteContext();
   const { resolvedAppTheme } = useReaderPreferences();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const { closeRoute, routeStyle } = useRouteSlideTransition(width);
   const theme = brand.appThemes[resolvedAppTheme];
-  const topBarHeight = insets.top + 56;
   const [overview, setOverview] = useState<StorageOverview | null>(null);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,50 +130,19 @@ export default function StorageScreen() {
           resolvedAppTheme === "deep" ? "rgba(8, 9, 6, 0.46)" : "rgba(250, 248, 242, 0.93)"
         }
       >
-        <View
-          style={[
-            styles.navBar,
-            {
-              height: topBarHeight,
-              paddingTop: insets.top,
-              backgroundColor: resolvedAppTheme === "deep" ? "#080906" : "#FAF8F2",
-              borderBottomColor: theme.line,
-            },
-          ]}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="返回"
-            hitSlop={16}
-            pressRetentionOffset={18}
-            android_ripple={{
-              color: "rgba(47, 107, 79, 0.14)",
-              borderless: true,
-              radius: 28,
-            }}
-            style={({ pressed }) => [
-              styles.backButton,
-              pressed && styles.backButtonPressed,
-            ]}
-            onPress={closeRoute}
-          >
-            <View pointerEvents="none" style={styles.backButtonIcon}>
-              <Text style={[styles.backButtonGlyph, { color: theme.text }]}>‹</Text>
-            </View>
-          </Pressable>
-          <Text pointerEvents="none" numberOfLines={1} style={[styles.navTitle, { color: theme.text }]}>
-            存储空间
-          </Text>
-        </View>
-
         <ScrollView
-          contentInsetAdjustmentBehavior="never"
+          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={[
             styles.content,
-            { paddingTop: topBarHeight + 24 },
             width >= 700 && styles.contentWide,
           ]}
         >
+          <M3PageHeader
+            theme={theme}
+            title="存储空间"
+            subtitle="书籍、缓存和阅读记录"
+            onBack={closeRoute}
+          />
           {!overview && !error ? (
             <View style={[styles.loadingPanel, { borderColor: theme.line, backgroundColor: theme.surfaceSolid }]}>
               <ActivityIndicator color={theme.accent} />
@@ -260,31 +226,53 @@ function StorageOverviewHero({
   const diskUsedBytes = Math.max(0, overview.totalDiskBytes - overview.availableDiskBytes);
   const appPercent = percentLabel(overview.totalBytes, overview.totalDiskBytes);
   const diskPercent = percentLabel(diskUsedBytes, overview.totalDiskBytes);
+  const ringSize = 232;
+  const ringStroke = 28;
+  const ringCenter = ringSize / 2;
+  const ringRadius = ringCenter - ringStroke / 2;
+  const ringCircumference = Math.PI * 2 * ringRadius;
+  const diskFraction = Math.max(0, Math.min(1, diskUsedBytes / Math.max(1, overview.totalDiskBytes)));
+  const appFraction = Math.max(0, Math.min(1, overview.totalBytes / Math.max(1, overview.totalDiskBytes)));
 
   return (
     <View style={[styles.hero, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>
-      <View style={styles.ringWrap} accessibilityLabel={`应用内存储 ${formatBytes(overview.totalBytes)}`}>
-        <View style={[styles.ringTrack, { borderColor: theme.surfaceContainer }]} />
-        <View
-          style={[
-            styles.ringArc,
-            styles.ringArcPhone,
-            {
-              borderLeftColor: theme.surfaceContainerHigh,
-              borderBottomColor: theme.surfaceContainerHigh,
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.ringArc,
-            styles.ringArcApp,
-            {
-              borderTopColor: theme.accent,
-              borderRightColor: theme.accent,
-            },
-          ]}
-        />
+      <View
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`应用内存储 ${formatBytes(overview.totalBytes)}`}
+        style={styles.ringWrap}>
+        <Svg width={ringSize} height={ringSize} style={styles.ringSvg}>
+          <Circle
+            cx={ringCenter}
+            cy={ringCenter}
+            r={ringRadius}
+            fill="none"
+            stroke={theme.surfaceContainer}
+            strokeWidth={ringStroke}
+          />
+          <Circle
+            cx={ringCenter}
+            cy={ringCenter}
+            r={ringRadius}
+            fill="none"
+            stroke={theme.surfaceContainerHigh}
+            strokeWidth={ringStroke}
+            strokeLinecap="round"
+            strokeDasharray={[diskFraction * ringCircumference, ringCircumference]}
+            transform={`rotate(-90 ${ringCenter} ${ringCenter})`}
+          />
+          <Circle
+            cx={ringCenter}
+            cy={ringCenter}
+            r={ringRadius}
+            fill="none"
+            stroke={theme.accent}
+            strokeWidth={ringStroke}
+            strokeLinecap="round"
+            strokeDasharray={[appFraction * ringCircumference, ringCircumference]}
+            transform={`rotate(-90 ${ringCenter} ${ringCenter})`}
+          />
+        </Svg>
         <View style={[styles.ringCore, { backgroundColor: theme.surfaceSolid }]}>
           <Text style={[styles.heroLabel, { color: theme.muted }]}>应用内存储</Text>
           <Text selectable style={[styles.heroValue, { color: theme.text }]}>
@@ -423,71 +411,28 @@ const styles = StyleSheet.create({
   routeShell: {
     flex: 1,
   },
-  navBar: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    left: 0,
-    zIndex: 10,
-    borderBottomWidth: 1,
-    justifyContent: "center",
-  },
-  backButton: {
-    marginLeft: 4,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backButtonPressed: {
-    opacity: 0.68,
-  },
-  backButtonIcon: {
-    width: 28,
-    height: 28,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backButtonGlyph: {
-    marginLeft: -2,
-    marginTop: -2,
-    fontSize: 38,
-    lineHeight: 38,
-    fontWeight: "500",
-    letterSpacing: 0,
-  },
-  navTitle: {
-    position: "absolute",
-    left: 88,
-    right: 88,
-    bottom: 16,
-    textAlign: "center",
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: "800",
-    letterSpacing: 0,
-  },
   content: {
     flexGrow: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 20,
+    paddingTop: 44,
     paddingBottom: 96,
     gap: 22,
   },
   contentWide: {
     width: "100%",
-    maxWidth: 560,
+    maxWidth: 820,
     alignSelf: "center",
   },
   loadingPanel: {
     minHeight: 220,
-    borderRadius: 24,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: "continuous",
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
     padding: 20,
+    boxShadow: brand.shadow.card,
   },
   loadingText: {
     fontSize: 14,
@@ -517,12 +462,13 @@ const styles = StyleSheet.create({
   },
   hero: {
     alignItems: "center",
-    borderRadius: 22,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: "continuous",
     borderWidth: 1,
     paddingHorizontal: 18,
     paddingVertical: 24,
     gap: 20,
+    boxShadow: brand.shadow.card,
   },
   ringWrap: {
     width: 248,
@@ -530,26 +476,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  ringTrack: {
+  ringSvg: {
     position: "absolute",
-    width: 232,
-    height: 232,
-    borderRadius: 116,
-    borderWidth: 28,
-  },
-  ringArc: {
-    position: "absolute",
-    width: 232,
-    height: 232,
-    borderRadius: 116,
-    borderWidth: 28,
-    borderColor: "transparent",
-  },
-  ringArcPhone: {
-    transform: [{ rotate: "32deg" }],
-  },
-  ringArcApp: {
-    transform: [{ rotate: "-18deg" }],
   },
   ringCore: {
     width: 154,
@@ -619,11 +547,12 @@ const styles = StyleSheet.create({
   },
   dataCard: {
     minHeight: 168,
-    borderRadius: 20,
+    borderRadius: brand.radius.large,
     borderCurve: "continuous",
     borderWidth: StyleSheet.hairlineWidth,
     padding: 18,
     gap: 14,
+    boxShadow: brand.shadow.card,
   },
   cardHeader: {
     minHeight: 44,

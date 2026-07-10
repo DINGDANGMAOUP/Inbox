@@ -52,6 +52,36 @@ export function M3Screen({
   );
 }
 
+export function M3PageHeader({
+  theme,
+  title,
+  subtitle,
+  onBack,
+}: {
+  theme: M3ThemeToken;
+  title: string;
+  subtitle: string;
+  onBack: () => void;
+}) {
+  return (
+    <Animated.View entering={m3Motion.fadeDown()} style={styles.pageHeader}>
+      <M3Pressable
+        captureTouches
+        feedback="subtle"
+        hitSlop={8}
+        accessibilityLabel="返回"
+        onPress={onBack}
+        style={[styles.pageBackButton, { backgroundColor: theme.surfaceSolid ?? theme.surface, borderColor: theme.line }]}>
+        <MaterialSymbol name="chevron.left" color={theme.text} description="返回" decorative size={20} />
+      </M3Pressable>
+      <View style={styles.pageTitleCopy}>
+        <Text numberOfLines={1} style={[styles.pageTitle, { color: theme.text }]}>{title}</Text>
+        <Text accessibilityLiveRegion="polite" numberOfLines={1} style={[styles.pageSubtitle, { color: theme.muted }]}>{subtitle}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+
 export function M3TopAppBar({
   theme,
   title,
@@ -418,6 +448,39 @@ export function M3SegmentedControl<Value extends string>({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+  },
+  pageHeader: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  pageBackButton: {
+    width: 48,
+    height: 48,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: brand.shadow.card,
+  },
+  pageTitleCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  pageTitle: {
+    fontSize: 27,
+    lineHeight: 33,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
   topAppBar: {
     minHeight: 66,

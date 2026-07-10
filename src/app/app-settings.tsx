@@ -1,10 +1,8 @@
 import { type ReactNode, useCallback, useEffect } from 'react';
-import { router, type Href } from 'expo-router';
-import { ActivityIndicator, BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, BackHandler, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { M3Screen } from '@/components/reader/m3';
+import { M3PageHeader, M3Screen } from '@/components/reader/m3';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { useRouteSlideTransition } from '@/components/reader/route-slide-transition';
@@ -31,10 +29,8 @@ const appThemeSwatches: Record<AppThemeMode, ThemeChoiceSwatch> = {
 export default function AppSettingsScreen() {
   const { preferences, resolvedAppTheme, loading, saving, updatePreferences } = useReaderPreferences();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const { closeRoute, routeStyle } = useRouteSlideTransition(width);
   const theme = brand.appThemes[resolvedAppTheme];
-  const topBarHeight = insets.top + 56;
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -58,34 +54,13 @@ export default function AppSettingsScreen() {
         theme={theme}
         backgroundSource={appThemeAssets[resolvedAppTheme].background}
         overlayColor={resolvedAppTheme === 'deep' ? 'rgba(8, 9, 6, 0.46)' : 'rgba(250, 248, 242, 0.93)'}>
-        <View
-          style={[
-            styles.navBar,
-            {
-              height: topBarHeight,
-              paddingTop: insets.top,
-              backgroundColor: resolvedAppTheme === 'deep' ? '#080906' : '#FAF8F2',
-              borderBottomColor: theme.line,
-            },
-          ]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="返回"
-            hitSlop={16}
-            pressRetentionOffset={18}
-            android_ripple={{ color: 'rgba(47, 107, 79, 0.14)', borderless: true, radius: 28 }}
-            style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
-            onPress={closeRoute}>
-            <View pointerEvents="none" style={styles.backButtonIcon}>
-              <Text style={[styles.backButtonGlyph, { color: theme.text }]}>‹</Text>
-            </View>
-          </Pressable>
-          <Text pointerEvents="none" numberOfLines={1} style={[styles.navTitle, { color: theme.text }]}>
-            应用设置
-          </Text>
-        </View>
-
-        <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={[styles.content, { paddingTop: topBarHeight + 24 }, width >= 700 && styles.contentWide]}>
+        <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.content, width >= 700 && styles.contentWide]}>
+          <M3PageHeader
+            theme={theme}
+            title="应用设置"
+            subtitle={saving ? '界面主题和数据管理 · 保存中' : '界面主题和数据管理'}
+            onBack={closeRoute}
+          />
           {loading ? (
             <View style={[styles.loadingPanel, { borderColor: theme.line, backgroundColor: theme.surfaceSolid }]}>
               <ActivityIndicator color={theme.accent} />
@@ -93,13 +68,6 @@ export default function AppSettingsScreen() {
             </View>
           ) : (
             <>
-              <View style={[styles.intro, { borderBottomColor: theme.line }]}>
-                <Text style={[styles.screenMeta, { color: theme.muted }]}>{appThemeModeCopy[preferences.appThemeMode].title}</Text>
-                <Text accessibilityLiveRegion="polite" style={[styles.saveStatus, { color: saving ? theme.accent : theme.muted }]}>
-                  {saving ? '保存中' : '已保存'}
-                </Text>
-              </View>
-
               <SettingGroup theme={theme} title="界面主题" value={appThemeModeCopy[preferences.appThemeMode].title}>
                 {brand.appThemeModes.map((themeMode) => {
                   const active = preferences.appThemeMode === themeMode;
@@ -117,16 +85,6 @@ export default function AppSettingsScreen() {
                     />
                   );
                 })}
-              </SettingGroup>
-
-              <SettingGroup theme={theme} title="数据与存储">
-                <SettingsActionRow
-                  theme={theme}
-                  title="存储空间"
-                  detail="查看占用，清理缓存和阅读数据"
-                  icon="storage"
-                  onPress={() => router.push('/storage' as Href)}
-                />
               </SettingGroup>
             </>
           )}
@@ -153,39 +111,8 @@ function SettingGroup({
         <Text style={[styles.settingTitle, { color: theme.text }]}>{title}</Text>
         {value ? <Text style={[styles.settingValue, { color: theme.accent }]}>{value}</Text> : null}
       </View>
-      <View style={[styles.settingSurface, { borderTopColor: theme.line, borderBottomColor: theme.line }]}>{children}</View>
+      <View style={[styles.settingSurface, { backgroundColor: theme.surfaceSolid, borderColor: theme.line }]}>{children}</View>
     </View>
-  );
-}
-
-function SettingsActionRow({
-  theme,
-  title,
-  detail,
-  icon,
-  onPress,
-}: {
-  theme: SettingsTheme;
-  title: string;
-  detail: string;
-  icon: MaterialSymbolName;
-  onPress: () => void;
-}) {
-  return (
-    <M3Pressable onPress={onPress} feedback="standard" accessibilityRole="button" style={[styles.actionRow, { borderBottomColor: theme.line }]}>
-      <View style={[styles.choiceIcon, { backgroundColor: theme.primaryContainer }]}>
-        <MaterialSymbol name={icon} color={theme.onPrimaryContainer} description={title} decorative size={16} />
-      </View>
-      <View style={styles.choiceCopy}>
-        <Text numberOfLines={1} style={[styles.choiceTitle, { color: theme.text }]}>
-          {title}
-        </Text>
-        <Text numberOfLines={1} style={[styles.choiceDetail, { color: theme.muted }]}>
-          {detail}
-        </Text>
-      </View>
-      <MaterialSymbol name="chevron.right" color={theme.muted} description={`${title}详情`} decorative size={18} />
-    </M3Pressable>
   );
 }
 
@@ -239,74 +166,25 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: 20,
+    paddingTop: 44,
     paddingBottom: 96,
-    gap: 24,
+    gap: 22,
   },
   contentWide: {
     width: '100%',
-    maxWidth: 560,
+    maxWidth: 820,
     alignSelf: 'center',
-  },
-  navBar: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    left: 0,
-    zIndex: 10,
-    borderBottomWidth: 1,
-    justifyContent: 'center',
-  },
-  backButton: {
-    marginLeft: 4,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonPressed: {
-    opacity: 0.68,
-  },
-  backButtonIcon: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backButtonGlyph: {
-    marginLeft: -2,
-    marginTop: -2,
-    fontSize: 38,
-    lineHeight: 38,
-    fontWeight: '500',
-    letterSpacing: 0,
-  },
-  navTitle: {
-    position: 'absolute',
-    left: 88,
-    right: 88,
-    bottom: 16,
-    textAlign: 'center',
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  saveStatus: {
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '800',
-    letterSpacing: 0,
   },
   loadingPanel: {
     minHeight: 220,
-    borderRadius: 24,
+    borderRadius: brand.radius.extraLarge,
     borderCurve: 'continuous',
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
+    boxShadow: brand.shadow.card,
   },
   loadingText: {
     fontSize: 14,
@@ -314,24 +192,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0,
   },
-  intro: {
-    minHeight: 42,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  screenMeta: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '700',
-    letterSpacing: 0,
-  },
   settingGroup: {
-    gap: 8,
+    gap: 10,
   },
   settingHeader: {
     minHeight: 22,
@@ -341,9 +203,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   settingTitle: {
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: '800',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: '900',
     letterSpacing: 0,
   },
   settingValue: {
@@ -353,8 +215,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   settingSurface: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: brand.radius.large,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    overflow: 'hidden',
+    boxShadow: brand.shadow.card,
   },
   choiceRow: {
     minHeight: 62,
@@ -365,16 +230,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 10,
-  },
-  actionRow: {
-    minHeight: 64,
-    borderRadius: 0,
-    borderCurve: 'continuous',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
   },
   choiceIcon: {
