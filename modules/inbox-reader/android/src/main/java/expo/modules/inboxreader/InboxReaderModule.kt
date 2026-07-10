@@ -68,6 +68,15 @@ import java.io.File
 private const val TAG = "InboxReader"
 private const val DECORATION_GROUP = "inbox-reader"
 
+private fun View.applySolidBackground(color: Int) {
+  setBackgroundColor(color)
+  if (this is ViewGroup) {
+    for (index in 0 until childCount) {
+      getChildAt(index).applySolidBackground(color)
+    }
+  }
+}
+
 private fun inboxDecorationTemplates(): HtmlDecorationTemplates =
   HtmlDecorationTemplates.defaultTemplates(
     Color.parseColor("#F6D46A"),
@@ -280,7 +289,7 @@ class InboxReaderView(context: Context, appContext: AppContext) : ExpoView(conte
 
   private val container = FragmentContainerView(context).also {
     it.id = View.generateViewId()
-    it.setBackgroundColor(Color.TRANSPARENT)
+    it.setBackgroundColor(Color.parseColor("#FFF8F0"))
     addView(it, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
   }
 
@@ -298,9 +307,10 @@ class InboxReaderView(context: Context, appContext: AppContext) : ExpoView(conte
   }
 
   fun loadIfNeeded() {
+    updateBackgroundColor()
     val nextUri = fileUri?.takeIf { it.isNotBlank() } ?: return
     if (!isAttachedToWindow || loadedUri == nextUri) {
-      currentFragment?.submitPreferences(preferences.toEpubPreferences())
+      currentFragment?.submitPreferences(preferences.toEpubPreferences(), readerBackgroundColor())
       return
     }
 
@@ -363,8 +373,19 @@ class InboxReaderView(context: Context, appContext: AppContext) : ExpoView(conte
 
   fun submitPreferences(nextPreferences: Map<String, Any?>) {
     preferences = nextPreferences
+    updateBackgroundColor()
     currentFragment?.submitPreferences(nextPreferences.toEpubPreferences())
   }
+
+  private fun updateBackgroundColor() {
+    val color = readerBackgroundColor()
+    setBackgroundColor(color)
+    container.setBackgroundColor(color)
+    currentFragment?.submitBackgroundColor(color)
+  }
+
+  private fun readerBackgroundColor(): Int =
+    (preferences?.get("readerTheme") as? String).backgroundColorInt()
 
   suspend fun getCurrentSelection(): Map<String, Any?>? =
     currentFragment?.getCurrentSelection()
@@ -386,6 +407,7 @@ class InboxReaderView(context: Context, appContext: AppContext) : ExpoView(conte
       it.publication = publication
       it.initialLocator = initialLocatorForPublication(publication)
       it.initialPreferences = preferences.toEpubPreferences()
+      it.readerBackgroundColor = readerBackgroundColor()
       it.onReady = { onReady(emptyMap<String, Any>()) }
       it.onError = { emitError(it) }
       it.onExternalLink = { url -> onExternalLink(mapOf<String, Any>("url" to url.toString())) }
@@ -445,6 +467,7 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
   var publication: Publication? = null
   var initialLocator: Locator? = null
   var initialPreferences: EpubPreferences = EpubPreferences()
+  var readerBackgroundColor: Int = Color.parseColor("#FFF8F0")
   var onReady: () -> Unit = {}
   var onError: (String) -> Unit = {}
   var onExternalLink: (AbsoluteUrl) -> Unit = {}
@@ -533,6 +556,7 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
     containerId = View.generateViewId()
     return FrameLayout(requireContext()).also {
       it.id = containerId
+      it.setBackgroundColor(readerBackgroundColor)
       it.layoutParams = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT
@@ -558,6 +582,7 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
       onError("Readium navigator was not created.")
       return
     }
+    submitBackgroundColor(readerBackgroundColor)
 
     currentNavigator.addInputListener(object : InputListener {
       override fun onTap(event: TapEvent): Boolean {
@@ -608,32 +633,48 @@ class InboxReadiumFragment : Fragment(), EpubNavigatorFragment.Listener {
     super.onDestroyView()
   }
 
-  fun submitPreferences(preferences: EpubPreferences) {
+  fun submitPreferences(preferences: EpubPreferences, backgroundColor: Int = readerBackgroundColor) {
     initialPreferences = preferences
+    submitBackgroundColor(backgroundColor)
     navigator?.submitPreferences(preferences)
   }
 
+  fun submitBackgroundColor(color: Int) {
+    readerBackgroundColor = color
+    view?.applySolidBackground(color)
+    navigator?.view?.applySolidBackground(color)
+  }
+
   fun goForward(animated: Boolean): Boolean =
-    navigator?.goForward(animated) ?: false
+    navigate { navigator?.goForward(animated) ?: false }
 
   fun goBackward(animated: Boolean): Boolean =
-    navigator?.goBackward(animated) ?: false
+    navigate { navigator?.goBackward(animated) ?: false }
 
   fun goToLocator(locator: Locator, animated: Boolean): Boolean =
-    navigator?.go(locator, animated) ?: false
+    navigate { navigator?.go(locator, animated) ?: false }
 
   fun goToReadingOrder(index: Int, progression: Double?, animated: Boolean): Boolean {
     val currentPublication = publication ?: return false
     val link = currentPublication.readingOrder.getOrNull(index) ?: return false
     val baseLocator = currentPublication.locatorFromLink(link) ?: return false
     val targetLocator = baseLocator.withProgression(progression)
-    val didGo = navigator?.go(targetLocator, animated) ?: false
+    val didGo = navigate { navigator?.go(targetLocator, animated) ?: false }
     if (didGo) {
       onLocationChange(targetLocator)
       latestLocatorHref = targetLocator.href.toString()
       syncDecorationsLater(160)
     }
     return didGo
+  }
+
+  private fun navigate(action: () -> Boolean): Boolean {
+    submitBackgroundColor(readerBackgroundColor)
+    return action().also { didNavigate ->
+      if (didNavigate) {
+        view?.post { submitBackgroundColor(readerBackgroundColor) }
+      }
+    }
   }
 
   suspend fun getCurrentSelection(): Map<String, Any>? =
@@ -850,13 +891,15 @@ private fun String?.fontFamily(): FontFamily? =
     else -> null
   }
 
-private fun String?.backgroundColor(): ReadiumColor? =
+private fun String?.backgroundColorInt(): Int =
   when (this) {
-    "night" -> ReadiumColor(Color.parseColor("#101411"))
-    "sepia" -> ReadiumColor(Color.parseColor("#F4E7D0"))
-    "eink" -> ReadiumColor(Color.parseColor("#FAFAF7"))
-    else -> ReadiumColor(Color.parseColor("#FFF8F0"))
+    "night" -> Color.parseColor("#101411")
+    "sepia" -> Color.parseColor("#F4E7D0")
+    "eink" -> Color.parseColor("#FAFAF7")
+    else -> Color.parseColor("#FFF8F0")
   }
+
+private fun String?.backgroundColor(): ReadiumColor? = ReadiumColor(backgroundColorInt())
 
 private fun String?.textColor(): ReadiumColor? =
   when (this) {

@@ -2,6 +2,7 @@ import { Link, router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { useSQLiteContext } from 'expo-sqlite';
+import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -25,17 +26,18 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { cancelAnimation, FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { InboxReaderView, type InboxReaderDecoration, type InboxReaderDecorationPressEvent, type InboxReaderExternalLinkEvent, type InboxReaderLocationEvent, type InboxReaderSelection, type InboxReaderTapEvent, type InboxReaderViewRef } from '../../../modules/inbox-reader';
 import { AdaptiveSurface } from '@/components/reader/adaptive-surface';
 import { IconButton } from '@/components/reader/icon-button';
 import { M3FilterChip, M3Screen, M3SegmentedControl, M3StatePanel, M3Stepper } from '@/components/reader/m3';
-import { m3Motion } from '@/components/reader/motion-presets';
+import { m3Easing, m3Motion } from '@/components/reader/motion-presets';
 import { M3Pressable } from '@/components/reader/m3-pressable';
 import { MaterialSymbol, type MaterialSymbolName } from '@/components/reader/material-symbol';
 import { brand } from '@/constants/brand';
+import { motion } from '@/constants/motion';
 import { readerFontFamilies, readerFontFamilyOrder, readerNativeFontFamily } from '@/constants/reader-fonts';
 import { readerThemeAssets } from '@/constants/theme-assets';
 import {
@@ -73,6 +75,7 @@ type NoteAnchor = {
 type PendingReadiumNavigation = {
   index: number;
   ratio: number;
+  keepPanelOpen: boolean;
   token: number;
   timeout: ReturnType<typeof setTimeout>;
 };
@@ -426,22 +429,34 @@ function formatAnnotationTime(value: string) {
   return `${month}/${day} ${hour}:${minute}`;
 }
 
-function SearchExcerpt({ text, query }: { text: string; query: string }) {
+function SearchExcerpt({
+  text,
+  query,
+  color,
+  accent,
+  accentText,
+}: {
+  text: string;
+  query: string;
+  color: string;
+  accent: string;
+  accentText: string;
+}) {
   const trimmed = query.trim();
   const matchIndex = trimmed ? text.toLowerCase().indexOf(trimmed.toLowerCase()) : -1;
 
   if (matchIndex < 0) {
     return (
-      <Text numberOfLines={3} style={styles.panelRowMeta}>
+      <Text numberOfLines={3} style={[styles.panelRowMeta, { color }]}>
         {text}
       </Text>
     );
   }
 
   return (
-    <Text numberOfLines={3} style={styles.panelRowMeta}>
+    <Text numberOfLines={3} style={[styles.panelRowMeta, { color }]}>
       {text.slice(0, matchIndex)}
-      <Text style={styles.searchMatchText}>{text.slice(matchIndex, matchIndex + trimmed.length)}</Text>
+      <Text style={[styles.searchMatchText, { backgroundColor: accent, color: accentText }]}>{text.slice(matchIndex, matchIndex + trimmed.length)}</Text>
       {text.slice(matchIndex + trimmed.length)}
     </Text>
   );
@@ -585,6 +600,7 @@ export default function ReaderScreen() {
   const [panel, setPanel] = useState<Panel>(null);
   const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>('all');
   const [chromeVisible, setChromeVisible] = useState(false);
+  const [chapterChromeVisible, setChapterChromeVisible] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [noteDraft, setNoteDraft] = useState('');
@@ -598,6 +614,9 @@ export default function ReaderScreen() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pageStatus, setPageStatus] = useState({ pageIndex: 1, pageCount: 1 });
+  const chromeProgress = useSharedValue(0);
+  const dockProgress = useSharedValue(1);
+  const readerSurfaceShieldOpacity = useSharedValue(0);
 
   const currentChapterMeta = chapters[currentIndex];
   const currentChapter = currentChapterMeta ? chapterCache[currentChapterMeta.id] : undefined;
@@ -606,21 +625,18 @@ export default function ReaderScreen() {
   const useNativePageReader = useNativeReadium && !useContinuousScroll;
   const themeToken = brand.readerThemes[preferences.readerTheme];
   const readerTheme = themeToken;
-  const chromePanelSurface = preferences.readerTheme === 'night' ? '#171A18' : brand.chrome.surface;
-  const chromeSubtleSurface = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.075)' : brand.chrome.surfaceSoft;
-  const chromeBorder = preferences.readerTheme === 'night' ? 'rgba(255, 255, 255, 0.13)' : brand.chrome.border;
   const chromeTheme = {
-    surface: chromePanelSurface,
-    panelSurface: chromePanelSurface,
-    subtleSurface: chromeSubtleSurface,
-    border: chromeBorder,
-    controlBorder: chromeBorder,
-    text: brand.chrome.text,
-    muted: brand.chrome.muted,
-    accent: brand.chrome.accent,
-    accentText: brand.chrome.accentText,
-    primaryContainer: brand.chrome.accent,
-    onPrimaryContainer: brand.chrome.accentText,
+    surface: readerTheme.surfaceSolid,
+    panelSurface: readerTheme.surfaceSolid,
+    subtleSurface: readerTheme.surfaceContainer,
+    border: readerTheme.line,
+    controlBorder: readerTheme.line,
+    text: readerTheme.text,
+    muted: readerTheme.muted,
+    accent: readerTheme.accent,
+    accentText: readerTheme.accentText,
+    primaryContainer: readerTheme.primaryContainer,
+    onPrimaryContainer: readerTheme.onPrimaryContainer,
   };
   const panelControlTheme = {
     surface: chromeTheme.subtleSurface,
@@ -803,10 +819,27 @@ export default function ReaderScreen() {
   }, [annotations]);
   const chromeTopOffset = Math.max(24, insets.top + 12);
   const chromeBottomOffset = Math.max(16, insets.bottom + 12);
+  const statusBarStyle = preferences.readerTheme === 'night' ? 'light' : 'dark';
   const bottomDockVisible = chromeVisible && panel === null;
   const panelHeight = panel
     ? Math.min(windowHeight * (panel === 'search' ? 0.62 : 0.74), windowHeight - chromeTopOffset - 32)
     : undefined;
+  const topChromeMotionStyle = useAnimatedStyle(() => ({
+    opacity: chromeProgress.get(),
+    transform: [{ translateY: reduceMotion ? 0 : -8 * (1 - chromeProgress.get()) }],
+  }));
+  const bottomChromeMotionStyle = useAnimatedStyle(() => {
+    const progress = Math.min(chromeProgress.get(), dockProgress.get());
+    return {
+      opacity: progress,
+      transform: reduceMotion
+        ? [{ translateY: 0 }, { scale: 1 }]
+        : [{ translateY: 16 * (1 - progress) }, { scale: 0.98 + progress * 0.02 }],
+    };
+  });
+  const readerSurfaceShieldStyle = useAnimatedStyle(() => ({ opacity: readerSurfaceShieldOpacity.get() }));
+  const chapterChromeEntering = reduceMotion ? FadeIn.duration(80) : m3Motion.fadeShortIn();
+  const chapterChromeExiting = FadeOut.duration(80).easing(m3Easing.emphasizedAccelerate);
   const selectionMenuStyle = useMemo(() => {
     if (!textSelection) {
       return null;
@@ -951,6 +984,33 @@ export default function ReaderScreen() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const showing = chromeVisible;
+    chromeProgress.set(withTiming(showing ? 1 : 0, {
+      duration: reduceMotion ? 80 : showing ? motion.duration.medium : 180,
+      easing: showing ? m3Easing.emphasizedDecelerate : m3Easing.emphasizedAccelerate,
+    }));
+
+    if (useNativePageReader && showing) {
+      cancelAnimation(readerSurfaceShieldOpacity);
+      readerSurfaceShieldOpacity.set(1);
+      readerSurfaceShieldOpacity.set(withTiming(0, {
+        duration: reduceMotion ? 80 : motion.duration.medium,
+        easing: m3Easing.emphasizedDecelerate,
+      }));
+    } else if (!showing) {
+      cancelAnimation(readerSurfaceShieldOpacity);
+      readerSurfaceShieldOpacity.set(0);
+    }
+  }, [chromeProgress, chromeVisible, readerSurfaceShieldOpacity, reduceMotion, useNativePageReader]);
+
+  useEffect(() => {
+    dockProgress.set(withTiming(panel === null ? 1 : 0, {
+      duration: reduceMotion ? 80 : motion.duration.short,
+      easing: panel === null ? m3Easing.emphasizedDecelerate : m3Easing.emphasizedAccelerate,
+    }));
+  }, [dockProgress, panel, reduceMotion]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -1116,25 +1176,29 @@ export default function ReaderScreen() {
   );
 
   const goToChapter = useCallback(
-    async (index: number, ratio = 0) => {
+    async (index: number, ratio = 0, keepPanelOpen = false) => {
       if (!book || !chapters[index]) {
         return;
       }
       const nextChapter = chapters[index];
       const targetRatio = clampRatio(ratio);
       if (useNativePageReader) {
+        setChapterChromeVisible(false);
+        await new Promise((resolve) => setTimeout(resolve, 80));
         clearPendingReadiumNavigation();
         const token = Date.now();
         const timeout = setTimeout(() => {
           if (pendingReadiumNavigation.current?.token === token) {
             pendingReadiumNavigation.current = null;
+            setChapterChromeVisible(true);
             showNotice('章节跳转失败');
           }
         }, 2200);
-        pendingReadiumNavigation.current = { index, ratio: targetRatio, token, timeout };
-        const jumped = Boolean(await nativeReaderRef.current?.goToReadingOrder(index, targetRatio, false).catch(() => false));
+        pendingReadiumNavigation.current = { index, ratio: targetRatio, keepPanelOpen, token, timeout };
+        const jumped = Boolean(await nativeReaderRef.current?.goToReadingOrder(index, targetRatio, !reduceMotion).catch(() => false));
         if (!jumped) {
           clearPendingReadiumNavigation();
+          setChapterChromeVisible(true);
           showNotice('章节跳转失败');
           return;
         }
@@ -1142,19 +1206,24 @@ export default function ReaderScreen() {
         setCurrentIndex(index);
         setRestoreRatio(targetRatio);
         setPageStatus({ pageIndex: 1, pageCount: 1 });
-        setPanel(null);
+        if (!keepPanelOpen) {
+          setPanel(null);
+        }
         setTextSelection(null);
         setNoteSelection(null);
         setActiveNoteAnchorKey(null);
         latestProgressRatio.current = targetRatio;
         void saveProgress(db, book.id, nextChapter.id, targetRatio);
+        setChapterChromeVisible(true);
         return;
       }
       pendingScrollNavigation.current = { index, ratio: targetRatio, animated: false };
       setCurrentIndex(index);
       setRestoreRatio(targetRatio);
       setPageStatus({ pageIndex: 1, pageCount: 1 });
-      setPanel(null);
+      if (!keepPanelOpen) {
+        setPanel(null);
+      }
       setTextSelection(null);
       setNoteSelection(null);
       setActiveNoteAnchorKey(null);
@@ -1162,7 +1231,7 @@ export default function ReaderScreen() {
       void saveProgress(db, book.id, nextChapter.id, targetRatio);
       requestAnimationFrame(restorePendingScrollNavigation);
     },
-    [book, chapters, clearPendingReadiumNavigation, db, restorePendingScrollNavigation, showNotice, useNativePageReader]
+    [book, chapters, clearPendingReadiumNavigation, db, reduceMotion, restorePendingScrollNavigation, showNotice, useNativePageReader]
   );
 
   const handleReadiumLocationChange = useCallback(
@@ -1184,7 +1253,9 @@ export default function ReaderScreen() {
         clearPendingReadiumNavigation();
         setRestoreRatio(pending.ratio);
         setPageStatus({ pageIndex: 1, pageCount: 1 });
-        setPanel(null);
+        if (!pending.keepPanelOpen) {
+          setPanel(null);
+        }
         setTextSelection(null);
         setNoteSelection(null);
         setActiveNoteAnchorKey(null);
@@ -1223,17 +1294,17 @@ export default function ReaderScreen() {
       }
       if (preferences.readingMode === 'page') {
         if (event.nativeEvent.zone === 'left') {
-          void nativeReaderRef.current?.goBackward(true);
+          void nativeReaderRef.current?.goBackward(!reduceMotion);
           return;
         }
         if (event.nativeEvent.zone === 'right') {
-          void nativeReaderRef.current?.goForward(true);
+          void nativeReaderRef.current?.goForward(!reduceMotion);
           return;
         }
       }
       setChromeVisible((visible) => !visible);
     },
-    [activeNoteAnchorKey, chromeVisible, closePanel, dismissSelectionNote, noteSelection, panel, preferences.readingMode, textSelection]
+    [activeNoteAnchorKey, chromeVisible, closePanel, dismissSelectionNote, noteSelection, panel, preferences.readingMode, reduceMotion, textSelection]
   );
 
   const handleReadiumDecorationPress = useCallback(
@@ -1553,6 +1624,7 @@ export default function ReaderScreen() {
   if (loading) {
     return (
       <M3Screen key={`reader-loading-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+        <StatusBar animated style={statusBarStyle} />
         <View style={styles.stateWrap}>
           <M3StatePanel theme={themeToken} title="正在打开阅读器" body="正在恢复章节、主题和阅读进度。" artwork={<ActivityIndicator color={themeToken.accent} />} />
         </View>
@@ -1563,6 +1635,7 @@ export default function ReaderScreen() {
   if (!book || !currentChapterMeta) {
     return (
       <M3Screen key={`reader-missing-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+        <StatusBar animated style={statusBarStyle} />
         <View style={styles.stateWrap}>
           <M3StatePanel
             theme={themeToken}
@@ -1586,6 +1659,7 @@ export default function ReaderScreen() {
   if (!useNativeReadium && preferences.readingMode === 'page') {
     return (
       <M3Screen key={`reader-readium-placeholder-${preferences.readerTheme}`} theme={themeToken} backgroundSource={readerThemeAssets[preferences.readerTheme].background}>
+        <StatusBar animated style={statusBarStyle} />
         <View style={styles.stateWrap}>
           <M3StatePanel
             theme={themeToken}
@@ -1608,6 +1682,7 @@ export default function ReaderScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: readerTheme.background }]}>
+      <StatusBar animated style={statusBarStyle} />
       <Link.AppleZoomTarget>
         <View style={styles.readerCanvas}>
           {useContinuousScroll ? (
@@ -1671,6 +1746,12 @@ export default function ReaderScreen() {
               style={[styles.readerView, { backgroundColor: readerTheme.background }]}
             />
           )}
+          {useNativePageReader && (
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.readerSurfaceShield, { backgroundColor: readerTheme.background }, readerSurfaceShieldStyle]}
+            />
+          )}
         </View>
       </Link.AppleZoomTarget>
 
@@ -1696,11 +1777,11 @@ export default function ReaderScreen() {
         </Animated.View>
       )}
 
-      {chromeVisible && (
-        <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeUp()}
-          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutUp()}
-          style={[styles.topChrome, { top: chromeTopOffset }]}>
+      <Animated.View
+        accessibilityElementsHidden={!chromeVisible}
+        importantForAccessibility={chromeVisible ? 'auto' : 'no-hide-descendants'}
+        pointerEvents={chromeVisible ? 'auto' : 'none'}
+        style={[styles.topChrome, { top: chromeTopOffset }, topChromeMotionStyle]}>
           <AdaptiveSurface style={[styles.topBar, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
             <IconButton
               icon="chevron.left"
@@ -1715,25 +1796,32 @@ export default function ReaderScreen() {
               <Text numberOfLines={1} style={[styles.chromeTitle, { color: chromeTheme.text }]}>
                 {bookTitleLabel(book.title)}
               </Text>
-              <Text numberOfLines={1} style={[styles.chromeMeta, { color: chromeTheme.muted }]}>
-                {chapterLabel(currentChapterMeta.title)}
-                {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
-              </Text>
+              {chapterChromeVisible ? (
+                <Animated.View entering={chapterChromeEntering} exiting={chapterChromeExiting}>
+                  <Text numberOfLines={1} style={[styles.chromeMeta, { color: chromeTheme.muted }]}>
+                    {chapterLabel(currentChapterMeta.title)}
+                    {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
+                  </Text>
+                </Animated.View>
+              ) : null}
             </View>
-            <Text style={[styles.chapterCount, { color: chromeTheme.accent }]}>
-              {currentIndex + 1}/{chapters.length}
-            </Text>
+            {chapterChromeVisible ? (
+              <Animated.View entering={chapterChromeEntering} exiting={chapterChromeExiting}>
+                <Text style={[styles.chapterCount, { color: chromeTheme.accent }]}>
+                  {currentIndex + 1}/{chapters.length}
+                </Text>
+              </Animated.View>
+            ) : null}
           </AdaptiveSurface>
-        </Animated.View>
-      )}
+      </Animated.View>
 
-      {bottomDockVisible && (
-        <Animated.View
-          entering={reduceMotion ? FadeIn.duration(80) : m3Motion.slideChromeDown()}
-          exiting={reduceMotion ? FadeOut.duration(80) : m3Motion.slideOutDown()}
-          style={[styles.bottomChrome, { bottom: chromeBottomOffset }]}>
+      <Animated.View
+        accessibilityElementsHidden={!bottomDockVisible}
+        importantForAccessibility={bottomDockVisible ? 'auto' : 'no-hide-descendants'}
+        pointerEvents={bottomDockVisible ? 'auto' : 'none'}
+        style={[styles.bottomChrome, { bottom: chromeBottomOffset }, bottomChromeMotionStyle]}>
           <AdaptiveSurface style={[styles.readerDock, { backgroundColor: chromeTheme.surface, borderColor: chromeTheme.border }]}>
-            <View style={[styles.chapterStrip, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
+            <View style={[styles.chapterStrip, { borderBottomColor: chromeTheme.controlBorder }]}>
               <M3Pressable
                 captureTouches
                 disabled={currentIndex === 0}
@@ -1743,13 +1831,17 @@ export default function ReaderScreen() {
                 <Text style={[styles.chapterTextButtonText, { color: chromeTheme.text }]}>上一章</Text>
               </M3Pressable>
               <M3Pressable captureTouches onPress={() => setPanel(panel === 'toc' ? null : 'toc')} feedback="subtle" style={styles.chapterCenter}>
-                <Text numberOfLines={1} style={[styles.chapterCenterTitle, { color: chromeTheme.text }]}>
-                  {chapterLabel(currentChapterMeta.title)}
-                </Text>
-                <Text style={[styles.chapterCenterMeta, { color: chromeTheme.muted }]}>
-                  {currentIndex + 1}/{chapters.length}
-                  {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
-                </Text>
+                {chapterChromeVisible ? (
+                  <Animated.View entering={chapterChromeEntering} exiting={chapterChromeExiting} style={styles.chapterCenterCopy}>
+                    <Text numberOfLines={1} style={[styles.chapterCenterTitle, { color: chromeTheme.text }]}>
+                      {chapterLabel(currentChapterMeta.title)}
+                    </Text>
+                    <Text style={[styles.chapterCenterMeta, { color: chromeTheme.muted }]}>
+                      {currentIndex + 1}/{chapters.length}
+                      {preferences.readingMode === 'page' && pageStatus.pageCount > 1 ? ` · ${pageStatus.pageIndex}/${pageStatus.pageCount} 页` : ''}
+                    </Text>
+                  </Animated.View>
+                ) : null}
               </M3Pressable>
               <M3Pressable
                 captureTouches
@@ -1767,8 +1859,7 @@ export default function ReaderScreen() {
               <ReaderToolChip icon="textformat.size" label="样式" active={panel === 'settings'} chromeTheme={chromeTheme} onPress={() => setPanel(panel === 'settings' ? null : 'settings')} />
             </View>
           </AdaptiveSurface>
-        </Animated.View>
-      )}
+      </Animated.View>
 
       {panel && (
         <Animated.View
@@ -1819,20 +1910,22 @@ export default function ReaderScreen() {
 
             {panel === 'toc' && (
               <View style={styles.panelBody}>
-                <ScrollView contentContainerStyle={styles.panelList}>
+                <ScrollView contentContainerStyle={styles.tocList} showsVerticalScrollIndicator={false}>
                   {chapters.map((chapter, index) => {
                     const active = index === currentIndex;
                     return (
                       <M3Pressable
                         key={chapter.id}
-                        onPress={() => goToChapter(index)}
+                        onPress={() => goToChapter(index, 0, true)}
                         feedback={active ? 'subtle' : 'standard'}
                         accessibilityRole="button"
                         accessibilityState={{ selected: active }}
                         style={[
-                          styles.panelRow,
                           styles.tocRow,
-                          { backgroundColor: active ? chromeTheme.primaryContainer : chromeTheme.subtleSurface, borderColor: active ? chromeTheme.accent : chromeTheme.controlBorder },
+                          {
+                            backgroundColor: active ? chromeTheme.primaryContainer : 'transparent',
+                            borderBottomColor: active || index === chapters.length - 1 ? 'transparent' : chromeTheme.controlBorder,
+                          },
                         ]}>
                         <Text style={[styles.tocIndex, { color: active ? chromeTheme.onPrimaryContainer : chromeTheme.muted }]}>
                           {String(index + 1).padStart(2, '0')}
@@ -1842,11 +1935,6 @@ export default function ReaderScreen() {
                             <Text numberOfLines={2} style={[styles.panelRowTitle, { color: active ? chromeTheme.onPrimaryContainer : chromeTheme.text }]}>
                               {chapterLabel(chapter.title)}
                             </Text>
-                            {active && (
-                              <View style={[styles.currentBadge, { backgroundColor: chromeTheme.accent }]}>
-                                <Text style={[styles.currentBadgeText, { color: chromeTheme.accentText }]}>当前</Text>
-                              </View>
-                            )}
                           </View>
                           <Text style={[styles.panelRowMeta, { color: active ? chromeTheme.onPrimaryContainer : chromeTheme.muted }]}>
                             {chapter.wordCount.toLocaleString()} 字
@@ -1879,7 +1967,13 @@ export default function ReaderScreen() {
                       accessibilityRole="button"
                       style={[styles.panelRow, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder }]}>
                       <Text style={[styles.panelRowTitle, { color: chromeTheme.text }]}>{chapterLabel(result.chapterTitle)}</Text>
-                      <SearchExcerpt text={result.excerpt} query={searchQuery} />
+                      <SearchExcerpt
+                        text={result.excerpt}
+                        query={searchQuery}
+                        color={chromeTheme.muted}
+                        accent={chromeTheme.accent}
+                        accentText={chromeTheme.accentText}
+                      />
                     </M3Pressable>
                   ))}
                   {searchQuery.trim() && searchResults.length === 0 && (
@@ -1924,8 +2018,8 @@ export default function ReaderScreen() {
                   multiline
                   style={[styles.panelInput, styles.noteInput, { backgroundColor: chromeTheme.subtleSurface, borderColor: chromeTheme.controlBorder, color: chromeTheme.text }]}
                 />
-                <M3Pressable captureTouches onPress={saveNote} feedback="standard" style={styles.saveNoteButton}>
-                  <Text style={styles.saveNoteText}>保存笔记</Text>
+                <M3Pressable captureTouches onPress={saveNote} feedback="standard" style={[styles.saveNoteButton, { backgroundColor: chromeTheme.accent }]}>
+                  <Text style={[styles.saveNoteText, { color: chromeTheme.accentText }]}>保存笔记</Text>
                 </M3Pressable>
                 <View style={styles.filterRow}>
                   {annotationFilters.map((filter) => {
@@ -2276,6 +2370,14 @@ const styles = StyleSheet.create({
   readerView: {
     flex: 1,
   },
+  readerSurfaceShield: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 10,
+  },
   scrollReaderContent: {
     paddingBottom: 72,
   },
@@ -2571,14 +2673,12 @@ const styles = StyleSheet.create({
   },
   chapterStrip: {
     minHeight: 46,
-    borderRadius: brand.radius.medium,
-    borderCurve: 'continuous',
-    borderWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 5,
-    paddingVertical: 5,
+    paddingBottom: 8,
   },
   chapterTextButton: {
     minWidth: 58,
@@ -2601,6 +2701,9 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  chapterCenterCopy: {
+    alignItems: 'center',
     gap: 2,
   },
   chapterCenterTitle: {
@@ -2758,6 +2861,9 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 12,
   },
+  tocList: {
+    paddingBottom: 4,
+  },
   panelScroll: {
     flex: 1,
     minHeight: 0,
@@ -2791,9 +2897,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tocRow: {
+    minHeight: 62,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: brand.radius.medium,
+    borderCurve: 'continuous',
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 11,
   },
   tocIndex: {
     width: 30,
@@ -2826,33 +2938,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
   },
-  currentBadge: {
-    borderRadius: brand.radius.round,
-    backgroundColor: brand.chrome.accent,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  currentBadgeText: {
-    color: brand.chrome.accentText,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 0,
-  },
   searchMatchText: {
-    color: brand.chrome.accentText,
-    backgroundColor: brand.chrome.accent,
     fontWeight: '900',
   },
   saveNoteButton: {
     alignSelf: 'flex-start',
     minHeight: 44,
-    backgroundColor: brand.chrome.accent,
     borderRadius: brand.radius.round,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   saveNoteText: {
-    color: brand.chrome.accentText,
     fontWeight: '900',
     letterSpacing: 0,
   },
