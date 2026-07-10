@@ -114,7 +114,7 @@ function FeaturedBookCover({ book, theme }: { book: LibraryBook; theme: Resolved
           <View style={[styles.featuredBookRuleShort, { backgroundColor: mutedColor }]} />
         </View>
         <Text numberOfLines={2} style={[styles.featuredBookTitle, { color: titleColor }]}>
-          {bookTitleLabel(book)}
+          {bookTitleLabel(book.title)}
         </Text>
         <Text numberOfLines={1} style={[styles.featuredBookAuthor, { color: mutedColor }]}>
           {authorLabel(book.author)}
@@ -356,7 +356,7 @@ export default function LibraryScreen() {
                 <Text style={styles.sectionKicker}>继续阅读</Text>
               </View>
               <Text numberOfLines={2} style={[styles.featuredTitle, { color: theme.text }]}>
-                {bookTitleLabel(featuredBook)}
+                {bookTitleLabel(featuredBook.title)}
               </Text>
               <Text numberOfLines={1} style={[styles.featuredMeta, { color: theme.muted }]}>
                 {progressLabel(featuredBook)}

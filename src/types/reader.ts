@@ -10,7 +10,7 @@ export type ReaderTheme = 'paper' | 'sepia' | 'night' | 'eink';
 
 export type ReaderFontFamily = 'system' | 'serif' | 'sans' | 'kai';
 
-export type ReadingMode = 'scroll' | 'page';
+type ReadingMode = 'scroll' | 'page';
 
 export type Book = {
   id: string;
@@ -34,13 +34,6 @@ export type Chapter = {
   textContent: string;
   textLength?: number;
   wordCount: number;
-};
-
-export type ReadingProgress = {
-  bookId: string;
-  chapterId: string;
-  scrollRatio: number;
-  updatedAt: string;
 };
 
 export type Annotation = {

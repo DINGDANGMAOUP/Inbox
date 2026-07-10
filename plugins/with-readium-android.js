@@ -34,7 +34,7 @@ function setKotlinGradlePluginVersion(contents) {
   );
 }
 
-function addCoreLibraryDesugaring(contents) {
+function configureReadiumAppBuild(contents) {
   let next = contents
     .replaceAll("androidx.annotation:annotation:1.9.1", "androidx.annotation:annotation:1.10.0")
     .replaceAll("org.jetbrains.kotlin:kotlin-reflect:2.1.20", `org.jetbrains.kotlin:kotlin-reflect:${KOTLIN_VERSION}`)
@@ -99,7 +99,7 @@ module.exports = function withReadiumAndroid(config) {
   });
 
   return withAppBuildGradle(config, (config) => {
-    config.modResults.contents = addCoreLibraryDesugaring(config.modResults.contents);
+    config.modResults.contents = configureReadiumAppBuild(config.modResults.contents);
     return config;
   });
 };

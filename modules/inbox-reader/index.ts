@@ -1,4 +1,3 @@
-export { default as InboxReaderModule } from './src/InboxReaderModule';
 export { InboxReaderView } from './src/InboxReaderView';
 export type {
   InboxReaderDecoration,

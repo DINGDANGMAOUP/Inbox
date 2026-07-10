@@ -54,7 +54,7 @@ export function LibraryBookRow({
         <View style={styles.tileCopy}>
           <View style={styles.tileTopRow}>
             <Text numberOfLines={2} style={[styles.tileTitle, { color: themeToken.text }]}>
-              {bookTitleLabel(book)}
+              {bookTitleLabel(book.title)}
             </Text>
             <View style={[styles.formatPill, { backgroundColor: themeToken.surface, borderColor: themeToken.line }]}>
               <Text style={[styles.formatPillText, { color: themeToken.accent }]}>{book.format.toUpperCase()}</Text>

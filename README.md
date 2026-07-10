@@ -16,18 +16,21 @@ bun run android
 bun run ios
 bun run web
 bun run lint
-bunx tsc --noEmit
+bun run typecheck
+bun run test
+bun run check
 ```
 
 ## 图标与主题资产
 
-品牌、主题背景和 app icon 都是静态资源，生成脚本在 `scripts/`：
+品牌、主题背景和 app icon 都是提交到仓库的静态资源。需要重新生成时：
 
 ```bash
-node scripts/generate-theme-assets.js <source-png>
-node scripts/generate-logo-assets.js <source-png>
-node scripts/build-app-icons.js
+python3 -m pip install -r scripts/requirements-assets.txt
+python3 scripts/generate_m3_assets.py
 ```
+
+`scripts/check-*.ts` 是 EPUB、TXT、章节切分和 Readium 内部出版物的轻量回归检查，统一由 `bun run test` 执行。`scripts/set-android-release-version.mjs` 同步更新 `app.json` 与 `package.json`，供 Android 发布流程使用。
 
 ## 当前边界
 

@@ -132,8 +132,6 @@ def save_icon_assets() -> None:
     icon = icon_canvas(1024, palette)
     icon.save(ASSETS / "icon.png")
     icon.resize((512, 512), Image.Resampling.LANCZOS).save(ASSETS / "favicon.png")
-    icon.resize((700, 700), Image.Resampling.LANCZOS).save(ASSETS / "brand" / "moyu-app-icon.png")
-    icon.resize((512, 512), Image.Resampling.LANCZOS).save(ASSETS / "splash-icon.png")
     Image.new("RGBA", (1024, 1024), hex_to_rgb("#F7F3EA") + (255,)).save(ASSETS / "android-icon-background.png")
     icon_canvas(1024, palette, transparent_bg=True).save(ASSETS / "android-icon-foreground.png")
     icon_canvas(1024, {**palette, "container": "#000000"}, transparent_bg=True, monochrome=True).save(ASSETS / "android-icon-monochrome.png")

@@ -30,7 +30,7 @@ import StickyNoteIcon from '@expo/material-symbols/sticky_note.xml';
 import StorageIcon from '@expo/material-symbols/storage.xml';
 import TextFieldsIcon from '@expo/material-symbols/text_fields.xml';
 
-export const materialSymbolSources = {
+const materialSymbolSources = {
   bookmark: BookmarkIcon,
   check: CheckIcon,
   'check.circle': CheckCircleIcon,

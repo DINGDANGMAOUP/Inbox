@@ -1,7 +1,7 @@
 {
   "name": "inbox",
   "main": "expo-router/entry",
-  "version": "0.0.4",
+  "version": "0.0.11",
   "dependencies": {
     "@expo/material-symbols": "^0.1.1",
     "@expo/ui": "~57.0.4",
@@ -46,11 +46,12 @@
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
-    "android:native": "expo run:android",
     "ios": "expo run:ios",
-    "ios:native": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "bun scripts/check-project-config.mjs && bun scripts/check-reader-db-migration.mjs && bun scripts/check-text-decoder.ts && bun scripts/check-reader-chunks.ts && bun scripts/check-readium-locators.ts && bun scripts/check-epub-parser.ts && bun scripts/check-publication-package.ts",
+    "check": "bun run lint && bun run typecheck && bun run test"
   },
   "private": true
 }

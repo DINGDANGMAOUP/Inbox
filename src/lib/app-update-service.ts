@@ -12,7 +12,7 @@ const apkMimeType = 'application/vnd.android.package-archive';
 const androidViewAction = 'android.intent.action.VIEW';
 const flagGrantReadUriPermission = 1;
 
-export type InstalledAppVersion = {
+type InstalledAppVersion = {
   version: string;
   buildNumber: number;
   environment: ExecutionEnvironment;
@@ -37,7 +37,7 @@ export type UpdateDownloadProgress = {
   progress?: number;
 };
 
-export type UpdateCheckResult =
+type UpdateCheckResult =
   | { status: 'current'; message: string; current: InstalledAppVersion; remote?: RemoteAppVersion }
   | { status: 'available'; message: string; current: InstalledAppVersion; remote: RemoteAppVersion }
   | { status: 'error'; message: string; current: InstalledAppVersion };
@@ -53,7 +53,7 @@ export function getInstalledAppVersion(): InstalledAppVersion {
     environment: Constants.executionEnvironment,
   };
 }
-export function getUpdateSourceInfo() {
+function getUpdateSourceInfo() {
   return {
     label: 'GitHub Releases',
     repository: `${updateConfig.owner}/${updateConfig.repo}`,

@@ -557,7 +557,7 @@ export async function listBooks(db: SQLiteDatabase) {
   return rows.map(mapLibraryBook);
 }
 
-export async function getBook(db: SQLiteDatabase, id: string) {
+async function getBook(db: SQLiteDatabase, id: string) {
   const row = await db.getFirstAsync<BookRow>(
     "SELECT * FROM books WHERE id = ?",
     id,
@@ -587,11 +587,6 @@ async function getChapterSummaryRows(db: SQLiteDatabase, bookId: string) {
       ORDER BY chapter_order ASC`,
     bookId,
   );
-}
-
-export async function getChapters(db: SQLiteDatabase, bookId: string) {
-  const rows = await getChapterRows(db, bookId);
-  return rows.map(mapChapter);
 }
 
 export async function getChapter(
@@ -753,7 +748,7 @@ async function refreshDecodedChaptersIfNeeded(
   }
 }
 
-export async function getProgress(db: SQLiteDatabase, bookId: string) {
+async function getProgress(db: SQLiteDatabase, bookId: string) {
   return db.getFirstAsync<{
     book_id: string;
     chapter_id: string;
@@ -963,8 +958,4 @@ export async function deleteBooks(db: SQLiteDatabase, bookIds: string[]) {
       bookDir.delete();
     }
   }
-}
-
-export async function deleteBook(db: SQLiteDatabase, bookId: string) {
-  await deleteBooks(db, [bookId]);
 }

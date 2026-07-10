@@ -6,7 +6,7 @@ import { useColorScheme, type ColorSchemeName } from 'react-native';
 import { getReaderPreferences, updateReaderPreferences } from '@/lib/reader-service';
 import type { AppThemeMode, ReaderPreferences, ResolvedAppTheme } from '@/types/reader';
 
-export const defaultReaderPreferences: ReaderPreferences = {
+const defaultReaderPreferences: ReaderPreferences = {
   appThemeMode: 'system',
   readerTheme: 'paper',
   fontFamily: 'system',
@@ -16,7 +16,7 @@ export const defaultReaderPreferences: ReaderPreferences = {
   readingMode: 'scroll',
 };
 
-export function resolveAppTheme(mode: AppThemeMode, systemScheme?: ColorSchemeName): ResolvedAppTheme {
+function resolveAppTheme(mode: AppThemeMode, systemScheme?: ColorSchemeName): ResolvedAppTheme {
   if (mode === 'mist' || mode === 'deep') {
     return mode;
   }

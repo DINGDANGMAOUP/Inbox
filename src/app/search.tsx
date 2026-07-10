@@ -20,7 +20,7 @@ import type { LibraryBook } from '@/types/reader';
 
 function normalizedSearchText(book: LibraryBook) {
   return [
-    bookTitleLabel(book),
+    bookTitleLabel(book.title),
     book.author,
     authorLabel(book.author),
     book.format,

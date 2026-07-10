@@ -203,14 +203,6 @@ class InboxReaderModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("InboxReader")
 
-    Function("getEngineInfo") {
-      mapOf(
-        "platform" to "android",
-        "name" to "Readium",
-        "version" to READIUM_VERSION
-      )
-    }
-
     View(InboxReaderView::class) {
       Prop("fileUri") { view: InboxReaderView, value: String? ->
         view.fileUri = value
@@ -261,10 +253,6 @@ class InboxReaderModule : Module() {
         view.clearSelection()
       }
     }
-  }
-
-  private companion object {
-    const val READIUM_VERSION = "3.3.0"
   }
 }
 

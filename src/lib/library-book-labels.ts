@@ -5,8 +5,8 @@ export function authorLabel(author: string) {
   return author === 'Local file' ? '本地文件' : author;
 }
 
-export function bookTitleLabel(book: Pick<LibraryBook, 'title'>) {
-  return cleanChapterTitle(book.title, book.title || '未命名书籍');
+export function bookTitleLabel(title: string) {
+  return cleanChapterTitle(title, title || '未命名书籍');
 }
 
 export function chapterLabel(title?: string | null) {
